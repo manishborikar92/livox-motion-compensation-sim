@@ -1,3 +1,7 @@
 __pycache__
 lidar_simulation_output
-livox_test_data
+realistic_lidar_output
+fast_realistic_lidar_output
+simple_lidar_output
+logs
+*.log

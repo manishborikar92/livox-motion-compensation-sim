@@ -738,7 +738,7 @@ class RealisticLivoxMid70Simulator:
             # Sign face
             n_face = int(width * height * 100)
             x_face = center[0] + np.random.uniform(-width/2, width/2, n_face)
-            y_face = center[1] + thickness/2
+            y_face = np.full(n_face, center[1] + thickness/2)
             z_face = center[2] + pole_height + np.random.uniform(0, height, n_face)
             
             # Support pole
