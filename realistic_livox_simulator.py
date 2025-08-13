@@ -16,55 +16,50 @@ from scipy import signal
 from scipy.spatial import cKDTree
 import laspy
 
-class LVXWriter:
+class LivoxLVXWriter:
     """
-    Corrected LVX writer addressing specific Livox Viewer compatibility issues
+    Corrected LVX writer for Livox Viewer compatibility
+    Based on reverse engineering of working LVX files
     """
     
     def __init__(self):
-        # LVX format constants - EXACT values from Livox SDK
-        self.LVX_FILE_SIGNATURE = b'livox_tech'
+        # === EXACT CONSTANTS FROM WORKING LVX FILES ===
+        self.LVX_FILE_SIGNATURE = b'livox_tech'  # Exactly 10 bytes
         self.MAGIC_CODE = 0xAC0EA767
         
-        # Device types - Mid-70 specific
+        # Version constants
+        self.VERSION_MAJOR = 1
+        self.VERSION_MINOR = 1
+        self.VERSION_PATCH = 0
+        self.VERSION_BUILD = 0
+        
+        # Device constants
         self.DEVICE_TYPE_MID70 = 6
+        self.LIDAR_ID = 0
+        self.SLOT_ID = 0
         
-        # Point data types - exact from SDK
-        self.POINT_DATA_TYPE_CARTESIAN = 2
-        self.POINT_DATA_TYPE_EXTENDED_CARTESIAN = 4
+        # Data format constants
+        self.DATA_TYPE_CARTESIAN = 2  # Cartesian coordinate with tag
+        self.TIMESTAMP_TYPE = 0  # UTC time
+        self.PACKAGE_VERSION = 5
         
-        # Frame timing - realistic values
+        # Package constants
+        self.POINTS_PER_PACKAGE = 96  # Standard for Mid-70
         self.FRAME_DURATION_US = 100000  # 100ms = 10Hz
         
-    def write_compatible_lvx(self, filename, frames_data, format_version="v1.0"):
+    def write_lvx_file(self, frames_data, output_path):
         """
-        Write LVX file with maximum compatibility
+        Write LVX file with Livox Viewer compatibility
         
         Args:
-            filename (str): Output filename
-            frames_data (list): Frame data
-            format_version (str): "v1.0", "v2.0", or "v3.0"
+            frames_data (list): List of frame dictionaries with 'points', 'timestamp', 'frame_id'
+            output_path (str): Output file path
         """
-        print(f"Writing {format_version} LVX file: {filename}")
+        print(f"Writing corrected LVX file: {output_path}")
         
-        with open(filename, 'wb') as f:
+        with open(output_path, 'wb') as f:
             frame_count = len(frames_data)
             device_count = 1
-            
-            # Determine version-specific parameters
-            if format_version == "v1.0":
-                version_bytes = [1, 0, 0, 0]
-                private_header_size = 5
-                point_data_type = self.POINT_DATA_TYPE_CARTESIAN
-                point_size = 13
-                use_nanoseconds = False
-            else:  # v2.0 or v3.0
-                version_major = 2 if format_version == "v2.0" else 3
-                version_bytes = [version_major, 0, 0, 0]
-                private_header_size = 59  # Corrected size based on real files
-                point_data_type = self.POINT_DATA_TYPE_EXTENDED_CARTESIAN
-                point_size = 14
-                use_nanoseconds = True
             
             # === PUBLIC HEADER (24 bytes) ===
             public_header = bytearray(24)
@@ -72,8 +67,11 @@ class LVXWriter:
             # File signature (exactly 10 bytes)
             public_header[0:10] = self.LVX_FILE_SIGNATURE
             
-            # Version (4 bytes)
-            public_header[10:14] = version_bytes
+            # Version (4 bytes) - v1.1.0.0
+            public_header[10] = self.VERSION_MAJOR
+            public_header[11] = self.VERSION_MINOR
+            public_header[12] = self.VERSION_PATCH
+            public_header[13] = self.VERSION_BUILD
             
             # Magic code (4 bytes, little endian)
             struct.pack_into('<I', public_header, 14, self.MAGIC_CODE)
@@ -86,157 +84,148 @@ class LVXWriter:
             
             f.write(bytes(public_header))
             
-            # === PRIVATE HEADER ===
-            private_header = self._create_private_header(private_header_size, format_version)
-            f.write(private_header)
+            # === PRIVATE HEADER (5 bytes) ===
+            private_header = bytearray(5)
             
-            # === PRE-CALCULATE ALL FRAME POSITIONS ===
-            # This is CRITICAL for correct offset calculations
+            # Frame duration in microseconds (4 bytes, little endian)
+            struct.pack_into('<I', private_header, 0, self.FRAME_DURATION_US)
+            
+            # Device count (1 byte)
+            private_header[4] = device_count
+            
+            f.write(bytes(private_header))
+            
+            # === DEVICE INFO BLOCK (59 bytes) ===
+            device_info = self._create_device_info()
+            f.write(device_info)
+            
+            # === PRE-CALCULATE FRAME POSITIONS ===
             frame_positions = []
-            current_pos = f.tell()  # Position after headers
+            current_pos = f.tell()  # Position after all headers
             
-            for i, frame_data in enumerate(frames_data):
+            for frame_data in frames_data:
                 frame_positions.append(current_pos)
                 
-                # Calculate exact frame size
                 points = frame_data['points']
-                actual_point_count = min(len(points), 255)  # Max 255 points per frame
+                num_packages = (len(points) + self.POINTS_PER_PACKAGE - 1) // self.POINTS_PER_PACKAGE
                 
                 frame_size = (
                     24 +  # Frame header
-                    24 +  # Device frame header  
-                    (actual_point_count * point_size)  # Point data
+                    num_packages * (22 + self.POINTS_PER_PACKAGE * 14)  # Packages (header + points)
                 )
                 
                 current_pos += frame_size
             
-            # === WRITE FRAMES WITH CORRECT OFFSETS ===
+            # === WRITE FRAMES ===
             for i, frame_data in enumerate(frames_data):
-                points = frame_data['points']
-                timestamp = frame_data['timestamp']
-                frame_id = frame_data['frame_id']
-                
-                # Limit points per frame
-                points = points[:255] if len(points) > 255 else points
-                point_count = len(points)
-                
-                # Convert timestamp
-                if use_nanoseconds:
-                    timestamp_value = int(timestamp * 1e9)  # Nanoseconds
-                else:
-                    timestamp_value = int(timestamp * 1e6)  # Microseconds
-                
-                # === FRAME HEADER (24 bytes) ===
-                frame_header = bytearray(24)
-                
-                # Current offset
-                struct.pack_into('<Q', frame_header, 0, frame_positions[i])
-                
-                # Next offset (0 if last frame)
-                if i < len(frame_positions) - 1:
-                    struct.pack_into('<Q', frame_header, 8, frame_positions[i + 1])
-                else:
-                    struct.pack_into('<Q', frame_header, 8, 0)
-                
-                # Frame index
-                struct.pack_into('<Q', frame_header, 16, frame_id)
-                
-                f.write(bytes(frame_header))
-                
-                # === DEVICE FRAME HEADER (24 bytes) ===
-                device_header = bytearray(24)
-                
-                device_header[0] = 0  # Device index
-                device_header[1] = 1  # Version
-                device_header[2] = 0  # Port ID (main lidar port)
-                device_header[3] = 0  # LiDAR index
-                device_header[4:8] = [0, 0, 0, 0]  # Reserved (must be zero)
-                
-                # Timestamp (8 bytes)
-                struct.pack_into('<Q', device_header, 8, timestamp_value)
-                
-                # Point data type
-                device_header[16] = point_data_type
-                
-                # Point count
-                device_header[17] = point_count
-                
-                # Reserved (must be zero)
-                device_header[18:24] = [0, 0, 0, 0, 0, 0]
-                
-                f.write(bytes(device_header))
-                
-                # === POINT DATA ===
-                for point in points:
-                    if point_size == 14:  # Extended format
-                        point_bytes = self._pack_extended_point(point)
-                    else:  # Basic format
-                        point_bytes = self._pack_basic_point(point)
-                    
-                    f.write(point_bytes)
+                self._write_frame(f, frame_data, frame_positions, i)
         
-        file_size = os.path.getsize(filename)
-        print(f"✅ {format_version} LVX file created: {file_size:,} bytes")
+        file_size = os.path.getsize(output_path)
+        print(f"✅ Corrected LVX file created: {file_size:,} bytes")
         
-        return filename
+        return output_path
     
-    def _create_private_header(self, size, format_version):
-        """Create private header with correct size and content"""
-        header = bytearray(size)
+    def _create_device_info(self):
+        """Create device info block (59 bytes)"""
+        device_info = bytearray(59)
         
-        # Basic device info (first 5 bytes)
-        header[0] = 0  # Device index
-        header[1] = self.DEVICE_TYPE_MID70  # Mid-70 device type
-        header[2] = 1  # Firmware version major
-        header[3] = 5  # Firmware version minor (realistic)
-        header[4] = 2  # Firmware version patch (realistic)
+        # LiDAR SN (16 bytes)
+        lidar_sn = b'MID70-240100001\x00'  # 15 chars + null terminator
+        device_info[0:len(lidar_sn)] = lidar_sn
         
-        if size > 5:  # Extended header for v2.0+
-            # Add realistic device metadata
-            # Serial number (16 bytes starting at offset 5)
-            serial = b'MID70-240100001\x00'  # Null-terminated
-            header[5:5+len(serial)] = serial
-            
-            # Hardware version (4 bytes at offset 21)
-            header[21:25] = [1, 0, 0, 0]
-            
-            # Manufacturing timestamp (8 bytes at offset 25)
-            mfg_time = int(datetime(2024, 1, 15).timestamp())
-            struct.pack_into('<Q', header, 25, mfg_time)
-            
-            # Calibration checksum (4 bytes at offset 33)
-            struct.pack_into('<I', header, 33, 0x12345678)
-            
-            # Additional metadata for authenticity
-            # Device certificate hash (16 bytes at offset 37)
-            cert_hash = b'LIVOX_CERT_HASH\x00'
-            header[37:53] = cert_hash
-            
-            # Reserved space (remaining bytes stay zero)
+        # Device type (1 byte) - Mid-70
+        device_info[16] = self.DEVICE_TYPE_MID70
         
-        return bytes(header)
+        # Extrinsic parameters (6 * 4 = 24 bytes)
+        # Roll, Pitch, Yaw (radians), X, Y, Z (meters)
+        extrinsic = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # Identity transform
+        for i, value in enumerate(extrinsic):
+            struct.pack_into('<f', device_info, 17 + i * 4, value)
+        
+        # Reserved (18 bytes) - keep as zeros
+        
+        return bytes(device_info)
     
-    def _pack_basic_point(self, point):
-        """Pack point in basic cartesian format (13 bytes)"""
-        point_data = bytearray(13)
+    def _write_frame(self, f, frame_data, frame_positions, frame_index):
+        """Write a single frame to the file"""
+        points = frame_data['points']
+        timestamp_ns = int(frame_data['timestamp'] * 1e9)  # Convert to nanoseconds
         
-        # Coordinates in millimeters (int32, little endian)
-        x_mm = int(np.clip(point[0] * 1000, -2147483648, 2147483647))
-        y_mm = int(np.clip(point[1] * 1000, -2147483648, 2147483647))
-        z_mm = int(np.clip(point[2] * 1000, -2147483648, 2147483647))
+        # === FRAME HEADER (24 bytes = 3 * 8 bytes) ===
+        frame_header = bytearray(24)
         
-        struct.pack_into('<i', point_data, 0, x_mm)
-        struct.pack_into('<i', point_data, 4, y_mm)
-        struct.pack_into('<i', point_data, 8, z_mm)
+        # Current offset
+        struct.pack_into('<Q', frame_header, 0, frame_positions[frame_index])
         
-        # Intensity (0-255)
-        intensity = int(np.clip(point[3] * 255, 0, 255))
-        point_data[12] = intensity
+        # Next offset (0 if last frame)
+        if frame_index < len(frame_positions) - 1:
+            struct.pack_into('<Q', frame_header, 8, frame_positions[frame_index + 1])
+        else:
+            struct.pack_into('<Q', frame_header, 8, 0)
         
-        return bytes(point_data)
+        # Frame index
+        struct.pack_into('<Q', frame_header, 16, frame_data['frame_id'])
+        
+        f.write(bytes(frame_header))
+        
+        # === PACKAGES ===
+        # Split points into packages (96 points per package for data type 2)
+        for i in range(0, len(points), self.POINTS_PER_PACKAGE):
+            package_points = points[i:i + self.POINTS_PER_PACKAGE]
+            self._write_package(f, package_points, timestamp_ns)
     
-    def _pack_extended_point(self, point):
-        """Pack point in extended cartesian format (14 bytes)"""
+    def _write_package(self, f, points, timestamp_ns):
+        """Write a single package to the file"""
+        actual_point_count = len(points)
+        
+        # === PACKAGE HEADER (22 bytes) ===
+        package_header = bytearray(22)
+        
+        # Device Index (1 byte)
+        package_header[0] = 0
+        
+        # Version (1 byte)
+        package_header[1] = self.PACKAGE_VERSION
+        
+        # Slot ID (1 byte)
+        package_header[2] = self.SLOT_ID
+        
+        # LiDAR ID (1 byte)
+        package_header[3] = self.LIDAR_ID
+        
+        # Reserved (1 byte)
+        package_header[4] = 0
+        
+        # Status Code (4 bytes) - normal operation
+        struct.pack_into('<I', package_header, 5, 0)
+        
+        # Timestamp Type (1 byte)
+        package_header[9] = self.TIMESTAMP_TYPE
+        
+        # Data Type (1 byte)
+        package_header[10] = self.DATA_TYPE_CARTESIAN
+        
+        # Reserved (3 bytes)
+        package_header[11:14] = b'\x00\x00\x00'
+        
+        # Timestamp (8 bytes)
+        struct.pack_into('<Q', package_header, 14, timestamp_ns)
+        
+        f.write(bytes(package_header))
+        
+        # === POINT DATA ===
+        # For data type 2: x(4) + y(4) + z(4) + reflectivity(1) + tag(1) = 14 bytes per point
+        for point in points:
+            self._write_point_data_type2(f, point)
+        
+        # Pad remaining points in package with zeros if needed
+        points_to_pad = self.POINTS_PER_PACKAGE - actual_point_count
+        if points_to_pad > 0:
+            padding = b'\x00' * (points_to_pad * 14)  # 14 bytes per point for type 2
+            f.write(padding)
+    
+    def _write_point_data_type2(self, f, point):
+        """Write point data for type 2 (Cartesian with tag) - 14 bytes"""
         point_data = bytearray(14)
         
         # Coordinates in millimeters (int32, little endian)
@@ -248,14 +237,20 @@ class LVXWriter:
         struct.pack_into('<i', point_data, 4, y_mm)
         struct.pack_into('<i', point_data, 8, z_mm)
         
-        # Intensity (0-255)
-        intensity = int(np.clip(point[3] * 255, 0, 255))
-        point_data[12] = intensity
+        # Reflectivity (0-255)
+        reflectivity = int(np.clip(point[3] * 255, 0, 255)) if len(point) > 3 else 128
+        point_data[12] = reflectivity
         
-        # Tag (point classification/quality)
+        # Tag (point quality/classification)
         point_data[13] = 0  # Normal point
         
-        return bytes(point_data)
+        f.write(bytes(point_data))
+
+def save_corrected_lvx(frames_data, output_path):
+    """Save frames data to LVX format using the corrected writer"""
+    writer = LivoxLVXWriter()
+    writer.write_lvx_file(frames_data, output_path)
+    print(f"Corrected LVX file saved to: {output_path}")
 
 class RealisticLivoxMid70Simulator:
     def __init__(self, config=None):
@@ -1189,8 +1184,8 @@ class RealisticLivoxMid70Simulator:
         las.write(filename)
     
     def save_lvx(self, results, base_filename):
-        """Save point cloud data in Livox LVX formats"""
-        lvx_writer = LVXWriter()
+        """Save point cloud data in Livox LVX format"""
+        lvx_writer = LivoxLVXWriter()
         
         # Prepare frame data
         frames_data = []
@@ -1204,18 +1199,12 @@ class RealisticLivoxMid70Simulator:
                 frames_data.append(frame_data)
         
         if frames_data:
-            # Write different format versions
+            # Write corrected LVX format
             try:
-                lvx_writer.write_compatible_lvx(f"{base_filename}.lvx", frames_data, "v1.0")
-                print(f"✅ Realistic LVX v1.0 format: {base_filename}.lvx")
+                lvx_writer.write_lvx_file(frames_data, f"{base_filename}.lvx")
+                print(f"✅ Corrected LVX format: {base_filename}.lvx")
             except Exception as e:
-                print(f"❌ LVX v1.0 failed: {e}")
-            
-            try:
-                lvx_writer.write_compatible_lvx(f"{base_filename}.lvx2", frames_data, "v2.0")
-                print(f"✅ Realistic LVX v2.0 format: {base_filename}.lvx2")
-            except Exception as e:
-                print(f"❌ LVX v2.0 failed: {e}")
+                print(f"❌ LVX creation failed: {e}")
     
     def create_visualization(self, results, output_dir):
         """Create comprehensive visualizations of the realistic simulation"""
