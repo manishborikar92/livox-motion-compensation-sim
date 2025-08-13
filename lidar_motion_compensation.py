@@ -1133,4 +1133,5 @@ def main():
 
 
 if __name__ == "__main__":
+    # python lidar_motion_compensation.py
     main()
