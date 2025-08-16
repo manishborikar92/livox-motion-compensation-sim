@@ -684,8 +684,6 @@ except Exception as e:
 
 ## Summary of Updates and Verifications
 
-## Summary of Updates and Verifications
-
 ### Critical SDK Compatibility Update
 🚨 **MAJOR UPDATE**: Mid-70 is **NOT SUPPORTED** by Livox SDK2  
 ✅ **Current Support**: Mid-70 requires original Livox SDK (active maintenance)  

@@ -90,7 +90,7 @@ lidar_simulation_output/
 
 | Before (Overlapped)  | After (Motion Compensation)  |
 | -------------------- | ---------------------------- |
-| ![Raw](docs/raw.png) | ![Aligned](docs/aligned.png) |
+| ![Raw](docs/images/raw.png) | ![Aligned](docs/images/aligned.png) |
 
 ---
 
