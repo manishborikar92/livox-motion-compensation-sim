@@ -6,14 +6,20 @@ for global alignment, addressing the overlapping frames problem.
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 import os
 import struct
-from datetime import datetime, timedelta
 from scipy.spatial.transform import Rotation as R
-from scipy import signal
 import laspy
+from typing import Dict, List, Optional, Tuple, Union
+
+# Conditional imports for better performance
+try:
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D
+    PLOTTING_AVAILABLE = True
+except ImportError:
+    PLOTTING_AVAILABLE = False
+    print("Warning: Matplotlib not available. Visualization features disabled.")
 
 class LivoxLVXWriter:
     """
@@ -47,7 +53,9 @@ class LivoxLVXWriter:
         self.LIDAR_ID = 1  # Mid-40/Mid-70 ID
         self.TIMESTAMP_TYPE = 1  # Nanosecond timestamp
         
-    def write_compatible_lvx(self, filename, frames_data):
+        # Note: Buffers removed as they were unused in the implementation
+        
+    def write_compatible_lvx(self, filename: str, frames_data: List[dict]) -> bool:
         """
         Write LVX file with full Livox Viewer compatibility
         
@@ -55,70 +63,86 @@ class LivoxLVXWriter:
             filename (str): Output filename
             frames_data (list): List of frame data dictionaries
                 Each frame should have: frame_id, timestamp, points
+                
+        Returns:
+            bool: True if successful, False otherwise
         """
-        print(f"Writing LVX file: {filename}")
+        # Input validation
+        if not filename or not isinstance(filename, str):
+            raise ValueError("Invalid filename provided")
+        if not frames_data or not isinstance(frames_data, list):
+            raise ValueError("Invalid frames_data provided")
+        if len(frames_data) == 0:
+            raise ValueError("No frame data provided")
+            
+        try:
+            print(f"Writing LVX file: {filename}")
+            
+            device_count = 1
+            frame_count = len(frames_data)
         
-        device_count = 1
-        frame_count = len(frames_data)
-        
-        with open(filename, 'wb') as f:
-            # === PUBLIC HEADER BLOCK (24 bytes) ===
-            public_header = bytearray(24)
-            
-            # File signature (exactly 16 bytes)
-            public_header[0:16] = self.LVX_FILE_SIGNATURE
-            
-            # Version (4 bytes: v1.1.0.0)
-            public_header[16] = 1  # Version-A
-            public_header[17] = 1  # Version-B
-            public_header[18] = 0  # Version-C
-            public_header[19] = 0  # Version-D
-            
-            # Magic code (4 bytes, little endian)
-            struct.pack_into('<I', public_header, 20, self.MAGIC_CODE)
-            
-            f.write(bytes(public_header))
-            
-            # === PRIVATE HEADER BLOCK (5 bytes) ===
-            private_header = bytearray(5)
-            
-            # Frame duration (4 bytes) - MUST be 50ms according to spec
-            struct.pack_into('<I', private_header, 0, self.FRAME_DURATION_MS)
-            
-            # Device count (1 byte)
-            private_header[4] = device_count
-            
-            f.write(bytes(private_header))
-            
-            # === DEVICE INFO BLOCK (59 bytes per device) ===
-            device_info = self._create_device_info()
-            f.write(device_info)
-            
-            # === PRE-CALCULATE FRAME POSITIONS ===
-            frame_positions = []
-            current_pos = f.tell()  # Position after headers
-            
-            for frame_data in frames_data:
-                frame_positions.append(current_pos)
+            with open(filename, 'wb') as f:
+                # === PUBLIC HEADER BLOCK (24 bytes) ===
+                public_header = bytearray(24)
                 
-                points = frame_data['points']
-                # Calculate packages needed (96 points per package for data type 2)
-                package_count = (len(points) + self.POINTS_PER_PACKAGE - 1) // self.POINTS_PER_PACKAGE
+                # File signature (exactly 16 bytes)
+                public_header[0:16] = self.LVX_FILE_SIGNATURE
                 
-                frame_size = (
-                    24 +  # Frame header (3 * 8 bytes)
-                    package_count * (22 + self.POINTS_PER_PACKAGE * 14)  # Package header + points
-                )
+                # Version (4 bytes: v1.1.0.0)
+                public_header[16] = 1  # Version-A
+                public_header[17] = 1  # Version-B
+                public_header[18] = 0  # Version-C
+                public_header[19] = 0  # Version-D
                 
-                current_pos += frame_size
+                # Magic code (4 bytes, little endian)
+                struct.pack_into('<I', public_header, 20, self.MAGIC_CODE)
+                
+                f.write(bytes(public_header))
+                
+                # === PRIVATE HEADER BLOCK (5 bytes) ===
+                private_header = bytearray(5)
+                
+                # Frame duration (4 bytes) - MUST be 50ms according to spec
+                struct.pack_into('<I', private_header, 0, self.FRAME_DURATION_MS)
+                
+                # Device count (1 byte)
+                private_header[4] = device_count
+                
+                f.write(bytes(private_header))
+                
+                # === DEVICE INFO BLOCK (59 bytes per device) ===
+                device_info = self._create_device_info()
+                f.write(device_info)
+                
+                # === PRE-CALCULATE FRAME POSITIONS ===
+                frame_positions = []
+                current_pos = f.tell()  # Position after headers
+                
+                for frame_data in frames_data:
+                    frame_positions.append(current_pos)
+                    
+                    points = frame_data['points']
+                    # Calculate packages needed (96 points per package for data type 2)
+                    package_count = (len(points) + self.POINTS_PER_PACKAGE - 1) // self.POINTS_PER_PACKAGE
+                    
+                    frame_size = (
+                        24 +  # Frame header (3 * 8 bytes)
+                        package_count * (22 + self.POINTS_PER_PACKAGE * 14)  # Package header + points
+                    )
+                    
+                    current_pos += frame_size
+                
+                # === WRITE FRAMES ===
+                for i, frame_data in enumerate(frames_data):
+                    self._write_frame(f, frame_data, frame_positions, i)
             
-            # === WRITE FRAMES ===
-            for i, frame_data in enumerate(frames_data):
-                self._write_frame(f, frame_data, frame_positions, i)
-        
-        file_size = os.path.getsize(filename)
-        print(f"✅ LVX file created successfully: {file_size:,} bytes")
-        return filename
+            file_size = os.path.getsize(filename)
+            print(f"✅ LVX file created successfully: {file_size:,} bytes")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error writing LVX file: {e}")
+            return False
     
     def _create_device_info(self):
         """Create device info block (59 bytes) matching specification"""
@@ -247,24 +271,28 @@ class LivoxLVXWriter:
         
         f.write(bytes(point_data))
 
-def save_corrected_lvx(frames_data, output_path):
-    """Save frames data to LVX format using the corrected writer"""
-    writer = LivoxLVXWriter()
-    writer.write_lvx_file(frames_data, output_path)
-    print(f"Corrected LVX file saved to: {output_path}")
-
 class LiDARMotionSimulator:
-    def __init__(self, config=None):
+    def __init__(self, config: Optional[Dict] = None):
         """
         Initialize the LiDAR Motion Simulator
         
         Args:
-            config (dict): Configuration parameters
+            config (dict, optional): Configuration parameters
         """
         self.config = self.default_config()
         if config:
+            self._validate_config(config)
             self.config.update(config)  # Merge custom config with defaults
+        
+        # Set random seed for reproducibility
         np.random.seed(self.config['random_seed'])
+        
+        # Initialize performance tracking
+        self._performance_stats = {
+            'scan_times': [],
+            'transform_times': [],
+            'total_points_processed': 0
+        }
         
     def default_config(self):
         """Default simulation configuration"""
@@ -301,6 +329,35 @@ class LiDARMotionSimulator:
             'obstacle_density': 0.1,    # Obstacle density factor
         }
     
+    def _validate_config(self, config: Dict) -> None:
+        """
+        Validate configuration parameters
+        
+        Args:
+            config: Configuration dictionary to validate
+            
+        Raises:
+            ValueError: If configuration is invalid
+        """
+        # Validate numeric parameters that exist in default config
+        numeric_keys = ['duration', 'lidar_fps', 'max_speed', 'range_max', 'range_min', 'points_per_frame']
+        for key in numeric_keys:
+            if key in config and not isinstance(config[key], (int, float)):
+                raise ValueError(f"Configuration '{key}' must be numeric")
+        
+        if 'lidar_fps' in config and config['lidar_fps'] <= 0:
+            raise ValueError("LiDAR frame rate must be positive")
+        
+        if 'duration' in config and config['duration'] <= 0:
+            raise ValueError("Simulation duration must be positive")
+            
+        if 'max_speed' in config and config['max_speed'] < 0:
+            raise ValueError("Maximum speed cannot be negative")
+            
+        if 'range_max' in config and 'range_min' in config:
+            if config['range_max'] <= config['range_min']:
+                raise ValueError("Maximum range must be greater than minimum range")
+        
     def generate_trajectory(self):
         """Generate vehicle trajectory based on configuration"""
         t = np.linspace(0, self.config['duration'], 
@@ -472,7 +529,7 @@ class LiDARMotionSimulator:
         points = []
         n_points = 200
         
-        # Generate points on box surfaces
+        # Generate points on all 6 box surfaces
         for face in range(6):
             if face == 0:  # Bottom
                 x = np.random.uniform(center[0] - size[0]/2, center[0] + size[0]/2, n_points//6)
@@ -482,7 +539,22 @@ class LiDARMotionSimulator:
                 x = np.random.uniform(center[0] - size[0]/2, center[0] + size[0]/2, n_points//6)
                 y = np.random.uniform(center[1] - size[1]/2, center[1] + size[1]/2, n_points//6)
                 z = np.full_like(x, center[2] + size[2]/2)
-            # Add other faces...
+            elif face == 2:  # Front (positive X)
+                x = np.full(n_points//6, center[0] + size[0]/2)
+                y = np.random.uniform(center[1] - size[1]/2, center[1] + size[1]/2, n_points//6)
+                z = np.random.uniform(center[2] - size[2]/2, center[2] + size[2]/2, n_points//6)
+            elif face == 3:  # Back (negative X)
+                x = np.full(n_points//6, center[0] - size[0]/2)
+                y = np.random.uniform(center[1] - size[1]/2, center[1] + size[1]/2, n_points//6)
+                z = np.random.uniform(center[2] - size[2]/2, center[2] + size[2]/2, n_points//6)
+            elif face == 4:  # Right (positive Y)
+                x = np.random.uniform(center[0] - size[0]/2, center[0] + size[0]/2, n_points//6)
+                y = np.full(n_points//6, center[1] + size[1]/2)
+                z = np.random.uniform(center[2] - size[2]/2, center[2] + size[2]/2, n_points//6)
+            elif face == 5:  # Left (negative Y)
+                x = np.random.uniform(center[0] - size[0]/2, center[0] + size[0]/2, n_points//6)
+                y = np.full(n_points//6, center[1] - size[1]/2)
+                z = np.random.uniform(center[2] - size[2]/2, center[2] + size[2]/2, n_points//6)
             
             intensity = np.random.uniform(0.4, 0.9, len(x))
             points.extend(zip(x, y, z, intensity))
@@ -494,17 +566,24 @@ class LiDARMotionSimulator:
         points = []
         density = 50  # points per surface unit
         
-        # Walls
+        # Generate all 4 walls
         for wall in range(4):
-            if wall == 0:  # Front wall
+            if wall == 0:  # Front wall (positive X)
                 x = np.full(density, center[0] + size[0]/2)
                 y = np.random.uniform(center[1] - size[1]/2, center[1] + size[1]/2, density)
                 z = np.random.uniform(center[2] - size[2]/2, center[2] + size[2]/2, density)
-            elif wall == 1:  # Back wall
+            elif wall == 1:  # Back wall (negative X)
                 x = np.full(density, center[0] - size[0]/2)
                 y = np.random.uniform(center[1] - size[1]/2, center[1] + size[1]/2, density)
                 z = np.random.uniform(center[2] - size[2]/2, center[2] + size[2]/2, density)
-            # Add other walls...
+            elif wall == 2:  # Right wall (positive Y)
+                x = np.random.uniform(center[0] - size[0]/2, center[0] + size[0]/2, density)
+                y = np.full(density, center[1] + size[1]/2)
+                z = np.random.uniform(center[2] - size[2]/2, center[2] + size[2]/2, density)
+            elif wall == 3:  # Left wall (negative Y)
+                x = np.random.uniform(center[0] - size[0]/2, center[0] + size[0]/2, density)
+                y = np.full(density, center[1] - size[1]/2)
+                z = np.random.uniform(center[2] - size[2]/2, center[2] + size[2]/2, density)
             
             intensity = np.random.uniform(0.3, 0.8, len(x))
             points.extend(zip(x, y, z, intensity))
@@ -585,17 +664,34 @@ class LiDARMotionSimulator:
         size = np.random.uniform(2, 6, 3)
         n_points = 100
         
-        # Random points on object surface
+        # Random points on all object surfaces
         for _ in range(n_points):
             # Random face
             face = np.random.randint(0, 6)
-            if face < 2:  # Top/bottom
+            if face == 0:  # Bottom
                 x = np.random.uniform(center[0] - size[0]/2, center[0] + size[0]/2)
                 y = np.random.uniform(center[1] - size[1]/2, center[1] + size[1]/2)
-                z = center[2] + (size[2]/2 if face == 1 else -size[2]/2)
-            # ... other faces
-            else:
-                x, y, z = center  # Simplified
+                z = center[2] - size[2]/2
+            elif face == 1:  # Top
+                x = np.random.uniform(center[0] - size[0]/2, center[0] + size[0]/2)
+                y = np.random.uniform(center[1] - size[1]/2, center[1] + size[1]/2)
+                z = center[2] + size[2]/2
+            elif face == 2:  # Front (positive X)
+                x = center[0] + size[0]/2
+                y = np.random.uniform(center[1] - size[1]/2, center[1] + size[1]/2)
+                z = np.random.uniform(center[2] - size[2]/2, center[2] + size[2]/2)
+            elif face == 3:  # Back (negative X)
+                x = center[0] - size[0]/2
+                y = np.random.uniform(center[1] - size[1]/2, center[1] + size[1]/2)
+                z = np.random.uniform(center[2] - size[2]/2, center[2] + size[2]/2)
+            elif face == 4:  # Right (positive Y)
+                x = np.random.uniform(center[0] - size[0]/2, center[0] + size[0]/2)
+                y = center[1] + size[1]/2
+                z = np.random.uniform(center[2] - size[2]/2, center[2] + size[2]/2)
+            elif face == 5:  # Left (negative Y)
+                x = np.random.uniform(center[0] - size[0]/2, center[0] + size[0]/2)
+                y = center[1] - size[1]/2
+                z = np.random.uniform(center[2] - size[2]/2, center[2] + size[2]/2)
             
             intensity = np.random.uniform(0.3, 0.8)
             points.append((x, y, z, intensity))
@@ -604,64 +700,74 @@ class LiDARMotionSimulator:
     
     def scan_environment(self, environment, sensor_pose):
         """
-        Simulate LiDAR scanning of environment from sensor pose
+        Highly optimized LiDAR scanning simulation
         
         Args:
             environment (np.array): Environment point cloud
             sensor_pose (dict): Sensor position and orientation
         """
-        # Transform environment to sensor coordinate system
         sensor_pos = sensor_pose['position']
         sensor_rot = sensor_pose['orientation']
         
-        # Create transformation matrix
+        # Pre-filter by distance to reduce computation
+        env_coords = environment[:, :3]
+        distances_sq = np.sum((env_coords - sensor_pos)**2, axis=1)
+        max_range_sq = self.config['range_max']**2
+        
+        # Early filtering by range
+        range_mask = distances_sq <= max_range_sq
+        if not np.any(range_mask):
+            return np.array([]).reshape(0, 4)
+        
+        env_filtered = environment[range_mask]
+        env_coords_filtered = env_filtered[:, :3]
+        
+        # Efficient transformation using broadcasting
         R_matrix = R.from_euler('xyz', sensor_rot).as_matrix()
+        env_translated = env_coords_filtered - sensor_pos
+        env_rotated = (R_matrix.T @ env_translated.T).T  # More efficient matrix multiplication
         
-        # Translate environment relative to sensor
-        env_translated = environment[:, :3] - sensor_pos
-        
-        # Rotate to sensor frame
-        env_rotated = (R_matrix.T @ env_translated.T).T
-        
-        # Convert to spherical coordinates
+        # Vectorized spherical coordinate conversion
         x, y, z = env_rotated[:, 0], env_rotated[:, 1], env_rotated[:, 2]
-        ranges = np.sqrt(x**2 + y**2 + z**2)
+        ranges = np.sqrt(distances_sq[range_mask])  # Reuse computed distances
         
-        # Horizontal angle (azimuth)
+        # Efficient FOV filtering with zero-range protection
         azimuth = np.arctan2(y, x) * 180 / np.pi
+        # Protect against division by zero
+        safe_ranges = np.maximum(ranges, 1e-6)
+        elevation = np.arcsin(np.clip(z / safe_ranges, -1, 1)) * 180 / np.pi
         
-        # Vertical angle (elevation)
-        elevation = np.arcsin(z / ranges) * 180 / np.pi
-        
-        # Filter by FOV and range
         fov_h = self.config['fov_horizontal'] / 2
         fov_v = self.config['fov_vertical'] / 2
         
-        mask = ((np.abs(azimuth) <= fov_h) & 
-                (np.abs(elevation) <= fov_v) &
-                (ranges >= self.config['range_min']) & 
-                (ranges <= self.config['range_max']))
+        fov_mask = ((np.abs(azimuth) <= fov_h) & 
+                    (np.abs(elevation) <= fov_v) &
+                    (ranges >= self.config['range_min']))
         
-        visible_points = env_rotated[mask]
-        visible_intensity = environment[mask, 3]
+        if not np.any(fov_mask):
+            return np.array([]).reshape(0, 4)
         
-        # Subsample to realistic point count
-        if len(visible_points) > self.config['points_per_frame']:
-            indices = np.random.choice(len(visible_points), 
-                                     self.config['points_per_frame'], 
-                                     replace=False)
+        visible_points = env_rotated[fov_mask]
+        visible_intensity = env_filtered[fov_mask, 3]
+        
+        # Efficient subsampling
+        n_visible = len(visible_points)
+        max_points = self.config['points_per_frame']
+        
+        if n_visible > max_points:
+            # Use systematic sampling for better distribution
+            step = n_visible // max_points
+            indices = np.arange(0, n_visible, step)[:max_points]
             visible_points = visible_points[indices]
             visible_intensity = visible_intensity[indices]
         
-        # Add LiDAR noise
-        noise = np.random.normal(0, self.config['lidar_range_noise'], 
-                               visible_points.shape)
-        visible_points += noise
+        # Vectorized noise addition
+        noise_std = self.config['lidar_range_noise']
+        if noise_std > 0:
+            noise = np.random.normal(0, noise_std, visible_points.shape)
+            visible_points += noise
         
-        # Combine points with intensity
-        scan_data = np.column_stack([visible_points, visible_intensity])
-        
-        return scan_data
+        return np.column_stack([visible_points, visible_intensity])
     
     def transform_pointcloud(self, points, transformation):
         """Apply transformation to point cloud"""
@@ -694,10 +800,10 @@ class LiDARMotionSimulator:
         print(f"Simulating {len(lidar_times)} LiDAR frames...")
         
         for i, t in enumerate(lidar_times):
-            # Interpolate sensor pose at LiDAR timestamp
+            # Interpolate sensor pose at LiDAR timestamp with bounds checking
             pose_idx = np.searchsorted(trajectory['time'], t)
-            if pose_idx >= len(trajectory['time']):
-                pose_idx = len(trajectory['time']) - 1
+            pose_idx = min(pose_idx, len(trajectory['time']) - 1)
+            pose_idx = max(pose_idx, 0)  # Ensure non-negative index
                 
             sensor_pose = {
                 'position': trajectory['position_gps'][pose_idx],
@@ -729,8 +835,8 @@ class LiDARMotionSimulator:
             motion_data.append({
                 'frame_id': i,
                 'timestamp': t,
-                'gps_lat': sensor_pose['position'][1] / 111320,  # Rough conversion to lat
-                'gps_lon': sensor_pose['position'][0] / 111320,  # Rough conversion to lon
+                'gps_lat': sensor_pose['position'][1] / 111320.0 + 40.0,  # Convert to approximate lat (base: 40°N)
+                'gps_lon': sensor_pose['position'][0] / (111320.0 * np.cos(np.radians(40.0))) - 74.0,  # Convert to approximate lon (base: 74°W)
                 'gps_alt': sensor_pose['position'][2],
                 'imu_roll': sensor_pose['orientation'][0],
                 'imu_pitch': sensor_pose['orientation'][1],
@@ -777,13 +883,20 @@ class LiDARMotionSimulator:
             filename = os.path.join(aligned_dir, f'aligned_frame_{i:04d}.pcd')
             self.save_pcd(aligned_pc, filename)
         
-        # Save merged aligned point cloud
-        merged_aligned = np.vstack(results['aligned_pointclouds'])
-        self.save_pcd(merged_aligned, os.path.join(output_dir, 'merged_aligned.pcd'))
+        # Save merged aligned point cloud (with empty array protection)
+        if results['aligned_pointclouds'] and all(len(pc) > 0 for pc in results['aligned_pointclouds']):
+            merged_aligned = np.vstack(results['aligned_pointclouds'])
+            self.save_pcd(merged_aligned, os.path.join(output_dir, 'merged_aligned.pcd'))
+        else:
+            print("Warning: No aligned point clouds to merge")
         
         # Save merged raw point cloud (for comparison)
-        merged_raw = np.vstack([scan['points_local'] for scan in results['raw_scans']])
-        self.save_pcd(merged_raw, os.path.join(output_dir, 'merged_raw_overlapped.pcd'))
+        raw_scans_with_points = [scan['points_local'] for scan in results['raw_scans'] if len(scan['points_local']) > 0]
+        if raw_scans_with_points:
+            merged_raw = np.vstack(raw_scans_with_points)
+            self.save_pcd(merged_raw, os.path.join(output_dir, 'merged_raw_overlapped.pcd'))
+        else:
+            print("Warning: No raw point clouds to merge")
         
         # Save as LAS format if laspy is available
         try:
@@ -878,6 +991,10 @@ class LiDARMotionSimulator:
     
     def visualize_results(self, results, output_dir):
         """Create visualizations of simulation results"""
+        if not PLOTTING_AVAILABLE:
+            print("⚠️ Matplotlib not available. Skipping visualizations.")
+            return
+            
         print("Creating visualizations...")
         
         # 1. Trajectory plot
