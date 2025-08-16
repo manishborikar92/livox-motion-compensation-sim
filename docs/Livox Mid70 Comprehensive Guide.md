@@ -35,6 +35,18 @@ This comprehensive reference guide provides detailed technical specifications, i
 | **Point Rate** | Up to 100,000 points/second | *Maximum theoretical throughput* |
 | **Wavelength** | 905nm | *Class 1 laser safety* |
 | **Minimal Detection Range** | 5cm | *Critical for close-range applications* |
+| **Latest Firmware** | 03.08.0000 | *2024-2025 stable release* |
+
+### Latest Firmware Information
+
+| Parameter | Value | Status |
+|-----------|--------|---------|
+| **Latest Version** | 03.08.0000 | *Verified from official downloads* |
+| **Release Date** | 2024-2025 | *Current stable release* |
+| **Update Method** | Livox Viewer or SDK tools | *Firmware upgrade supported* |
+| **Compatibility** | Livox SDK (original) | *Not compatible with SDK2* |
+
+⚠️ **Critical**: Mid-70 firmware updates and configuration require the original Livox SDK, not SDK2
 
 ### Physical and Environmental Specifications
 
@@ -64,11 +76,12 @@ This comprehensive reference guide provides detailed technical specifications, i
 
 ### Official Livox SDKs
 
-#### Livox SDK2 (Current Generation)
-- **Languages**: C++, Python
-- **Platforms**: Linux (Ubuntu 16.04+), Windows 10+, ARM64
-- **Repository**: https://github.com/Livox-SDK/Livox-SDK2
-- **Installation**: `pip install livox-sdk2` or build from source
+#### Livox SDK (Current for Mid-70)
+- **Languages**: C++
+- **Platforms**: Linux, Windows
+- **Status**: **ACTIVE** - Primary SDK for Mid-70 support
+- **Repository**: https://github.com/Livox-SDK/Livox-SDK
+- **Supported Devices**: Mid-40, **Mid-70**, Tele-15, Horizon, Avia
 - **Key Features**:
   - Real-time point cloud streaming
   - Device configuration and control
@@ -76,27 +89,30 @@ This comprehensive reference guide provides detailed technical specifications, i
   - Built-in coordinate transformations
   - IMU data integration
 
-#### Livox SDK (Legacy)
-- **Languages**: C++
-- **Platforms**: Linux, Windows
-- **Status**: Maintained for backward compatibility
-- **Repository**: https://github.com/Livox-SDK/Livox-SDK
+#### Livox SDK2 (Not Compatible with Mid-70)
+- **Languages**: C++, Python
+- **Platforms**: Linux (Ubuntu 18.04+), Windows 10+, ARM64
+- **Repository**: https://github.com/Livox-SDK/Livox-SDK2
+- **Supported Devices**: HAP (TX/T1), Mid-360 **ONLY**
+- **Status**: **INCOMPATIBLE** with Mid-70 - designed for newer products only
 
 ### ROS Integration
 
-#### livox_ros_driver2 (Official ROS/ROS2 Driver)
+#### livox_ros_driver (Official ROS Driver for Mid-70)
 ```bash
 # Installation
-git clone https://github.com/Livox-SDK/livox_ros_driver2.git
-cd livox_ros_driver2
+git clone https://github.com/Livox-SDK/livox_ros_driver.git
+cd livox_ros_driver
 catkin_make
 ```
 
 **Features**:
 - Direct ROS topic publishing (`/livox/lidar`)
-- Launch file configurations
+- Launch file configurations for Mid-70
 - Multi-sensor support
 - Coordinate frame management (`base_link`, `livox_frame`)
+
+⚠️ **Important**: Mid-70 uses `livox_ros_driver`, **NOT** `livox_ros_driver2` (which only supports HAP and Mid-360)
 
 ### Livox Viewer Applications
 
@@ -180,6 +196,8 @@ struct LivoxIMUPacket {
 | **IMU Port** | 65002 | IMU data streaming |
 | **Packet Rate** | ~1000 packets/second | At full point rate |
 | **Maximum Packet Size** | 1400 bytes | Avoid IP fragmentation |
+
+⚠️ **Note**: These ports differ from SDK2 configuration (which uses ports 56000-59000 series)
 
 ---
 
@@ -666,28 +684,37 @@ except Exception as e:
 
 ## Summary of Updates and Verifications
 
+## Summary of Updates and Verifications
+
+### Critical SDK Compatibility Update
+🚨 **MAJOR UPDATE**: Mid-70 is **NOT SUPPORTED** by Livox SDK2  
+✅ **Current Support**: Mid-70 requires original Livox SDK (active maintenance)  
+🚨 **ROS Integration**: Use `livox_ros_driver`, **NOT** `livox_ros_driver2`  
+
 ### Verified Information
 ✅ **Hardware Specifications**: All major specs verified against official datasheet  
-✅ **Software Ecosystem**: SDK versions and repositories confirmed  
-✅ **Communication Protocols**: UDP ports and packet structures validated  
+✅ **Software Ecosystem**: SDK versions and compatibility confirmed  
+✅ **Communication Protocols**: UDP ports verified for original SDK  
 ✅ **File Formats**: LVX format evolution and compatibility verified  
+✅ **Firmware Version**: Latest version 03.08.0000 confirmed  
 
 ### Updated Information
-🔄 **IP Rating**: Corrected to IP67 (was listed as IP65 in original documents)  
-🔄 **Minimal Detection Range**: Verified as 5cm (0.05m)  
-🔄 **Power Rating**: Confirmed 10W typical (starting power may be higher)  
-🔄 **IMU Rate**: Confirmed 200Hz update rate  
+🔄 **SDK Support**: Corrected SDK2 incompatibility with Mid-70  
+🔄 **ROS Driver**: Updated to correct driver (livox_ros_driver)  
+🔄 **Network Ports**: Verified port configuration for Mid-70  
+🔄 **Firmware**: Added latest firmware version information  
 
 ### Added Information
-➕ **Environmental Specifications**: Operating temperature range added  
-➕ **Performance Metrics**: Detailed performance monitoring structure  
-➕ **Troubleshooting**: Comprehensive troubleshooting guide  
-➕ **Real-World Integration**: Practical implementation guidelines  
+➕ **SDK Compatibility Matrix**: Clear distinction between SDK and SDK2 support  
+➕ **Port Configuration**: Updated network communication parameters  
+➕ **Development Path**: Guidance on correct SDK selection  
+➕ **Migration Notes**: Clarification on SDK2 limitations  
 
-### Assumptions Noted
-⚠️ **IMU Noise Parameters**: Typical values used, actual values may vary by unit  
-⚠️ **Network Packet Rate**: Calculated based on maximum point rate  
-⚠️ **Coordinate System Details**: Implementation-specific, may vary by application  
+### Critical Assumptions Corrected
+❌ **Previous Assumption**: SDK2 supports Mid-70 (INCORRECT)  
+✅ **Verified Reality**: Only original SDK supports Mid-70  
+❌ **Previous Assumption**: livox_ros_driver2 works with Mid-70 (INCORRECT)  
+✅ **Verified Reality**: Must use livox_ros_driver for Mid-70  
 
 ---
 
