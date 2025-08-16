@@ -197,6 +197,19 @@ class DataExporter:
     def export_all_formats(self, data: dict) -> dict
 ```
 
+### DataVisualizer3D
+
+Comprehensive 3D data visualization supporting multiple backends and formats.
+
+```python
+class DataVisualizer3D:
+    def __init__(self, backend: str = 'auto')
+    def load_data(self, filepath: str, **kwargs) -> dict
+    def visualize(self, data: Union[str, dict], **kwargs) -> None
+    def create_comparison_view(self, data_list: List[Union[str, dict]], titles: Optional[List[str]] = None, **kwargs) -> None
+    def generate_statistics(self, data: Union[str, dict]) -> dict
+```
+
 #### Constructor
 
 ```python
@@ -226,6 +239,130 @@ Exports point cloud data in specified format.
 exporter = DataExporter('./output')
 exporter.export_point_cloud(points, 'pcd', 'scan.pcd')
 exporter.export_point_cloud(points, 'las', 'scan.las')
+```
+
+#### Constructor
+
+```python
+def __init__(self, backend: str = 'auto')
+```
+
+**Parameters:**
+- `backend` (str): Visualization backend ('matplotlib', 'open3d', 'plotly', 'auto')
+
+**Example:**
+```python
+# Auto-select best available backend
+visualizer = DataVisualizer3D()
+
+# Use specific backend
+visualizer = DataVisualizer3D(backend='plotly')
+```
+
+#### Methods
+
+##### load_data()
+
+```python
+def load_data(self, filepath: str, **kwargs) -> dict
+```
+
+Load 3D data from various file formats.
+
+**Parameters:**
+- `filepath` (str): Path to the data file
+- `**kwargs`: Additional parameters for specific loaders
+
+**Returns:**
+- `dict`: Dictionary containing loaded data and metadata
+
+**Supported Formats:**
+- Point clouds: PCD, PLY, LAS/LAZ, XYZ, CSV, NPY/NPZ
+- Meshes: OBJ, STL, OFF
+
+**Example:**
+```python
+# Load point cloud
+data = visualizer.load_data('point_cloud.pcd')
+
+# Load with custom parameters
+data = visualizer.load_data('data.csv', delimiter=',')
+```
+
+##### visualize()
+
+```python
+def visualize(self, data: Union[str, dict], **kwargs) -> None
+```
+
+Visualize 3D data using the selected backend.
+
+**Parameters:**
+- `data` (str or dict): File path or loaded data dictionary
+- `**kwargs`: Visualization parameters
+
+**Visualization Parameters:**
+- `point_size` (float): Point size for rendering
+- `opacity` (float): Point opacity (0.0-1.0)
+- `colorscale` (str): Color scale name
+- `title` (str): Visualization title
+- `max_points` (int): Maximum points to display
+
+**Example:**
+```python
+# Basic visualization
+visualizer.visualize('data.pcd')
+
+# Custom visualization
+visualizer.visualize(data, 
+                    point_size=2, 
+                    opacity=0.8, 
+                    colorscale='Plasma',
+                    title='My Point Cloud')
+```
+
+##### create_comparison_view()
+
+```python
+def create_comparison_view(self, data_list: List[Union[str, dict]], 
+                          titles: Optional[List[str]] = None, **kwargs) -> None
+```
+
+Create side-by-side comparison of multiple datasets.
+
+**Parameters:**
+- `data_list` (list): List of file paths or data dictionaries
+- `titles` (list, optional): Titles for each dataset
+- `**kwargs`: Visualization parameters
+
+**Example:**
+```python
+# Compare multiple files
+datasets = ['before.pcd', 'after.pcd']
+titles = ['Before Processing', 'After Processing']
+visualizer.create_comparison_view(datasets, titles)
+```
+
+##### generate_statistics()
+
+```python
+def generate_statistics(self, data: Union[str, dict]) -> dict
+```
+
+Generate comprehensive statistics for 3D data.
+
+**Parameters:**
+- `data` (str or dict): File path or loaded data dictionary
+
+**Returns:**
+- `dict`: Dictionary containing statistics
+
+**Example:**
+```python
+stats = visualizer.generate_statistics('data.pcd')
+print(f"Points: {stats['num_points']:,}")
+print(f"Bounds: {stats['bounds']}")
+print(f"Dimensions: {stats['dimensions']}")
 ```
 
 ## Data Structures
@@ -494,8 +631,12 @@ class NetworkInterface:
 ### Basic Usage Example
 
 ```python
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+
 import numpy as np
-from livox_simulator import LiDARMotionSimulator, DataExporter
+from livox_simulator import LiDARMotionSimulator, DataExporter, DataVisualizer3D
 
 # Configure simulation
 config = {
@@ -510,11 +651,16 @@ config = {
 simulator = LiDARMotionSimulator(config)
 results = simulator.run_simulation()
 
-# Export results
-exporter = DataExporter('./output')
-exporter.export_all_formats(results)
+# Visualize results
+visualizer = DataVisualizer3D(backend='plotly')
+visualizer.visualize(results['point_cloud'], 
+                    title='Simulation Results',
+                    point_size=2)
 
+# Results automatically exported to output directory
 print(f"Simulation completed: {len(results['frames'])} frames generated")
+print(f"Total points: {len(results['point_cloud']):,}")
+print(f"Output directory: {results['config']['output_directory']}")
 ```
 
 ### Advanced Processing Example

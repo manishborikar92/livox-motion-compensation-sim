@@ -21,11 +21,15 @@ sudo apt install python3-pip python3-venv
 
 ## Core Software Installation
 
-### 1. Livox SDK Installation (Critical)
+### 1. Pure Python Implementation (No SDK Required)
 
-**⚠️ Important**: Use the original Livox SDK, NOT SDK2 for Mid-70 compatibility.
+**✅ Simulation Only**: This is a pure Python simulation framework that does not require the Livox SDK or any hardware drivers. All LiDAR behavior is simulated in software.
+
+**For Hardware Integration** (Optional - not required for simulation):
+If you plan to integrate with real Livox Mid-70 hardware later, you would need:
 
 ```bash
+# Only needed for real hardware integration (not simulation)
 # Install dependencies
 sudo apt install build-essential cmake git
 
@@ -38,12 +42,13 @@ mkdir build && cd build
 cmake ..
 make -j$(nproc)
 sudo make install
-
-# Verify installation
-./sample/lidar_sample/lidar_sample
 ```
 
-### 2. Python Dependencies
+**⚠️ Note**: The simulation framework is completely independent of hardware and runs without any SDK installation.
+
+### 2. Python Dependencies (Pure Python Implementation)
+
+**✅ Pure Python**: This implementation runs entirely in Python with no compilation required.
 
 Create a virtual environment and install required packages:
 
@@ -52,13 +57,29 @@ Create a virtual environment and install required packages:
 python3 -m venv livox_env
 source livox_env/bin/activate
 
-# Install core dependencies
-pip install numpy scipy matplotlib pandas
-pip install utm laspy open3d
+# Install all dependencies from requirements.txt
+pip install -r requirements.txt
 
-# Optional: Install additional packages
-pip install opencv-python scikit-learn
+# Verify installation
+python -c "import numpy, scipy, matplotlib, open3d, laspy, utm; print('All dependencies installed successfully')"
 ```
+
+**Core Dependencies:**
+- `numpy>=1.21.0` - Numerical computations
+- `scipy>=1.7.0` - Scientific computing
+- `matplotlib>=3.5.0` - Visualization and plotting
+- `pandas>=1.3.0` - Data manipulation
+- `open3d>=0.15.0` - Point cloud processing and 3D visualization
+- `laspy>=2.0.0` - LAS file format support
+- `utm>=0.7.0` - UTM coordinate conversion
+- `pyyaml>=6.0` - Configuration file parsing
+- `tqdm>=4.62.0` - Progress bars
+- `psutil>=5.8.0` - System monitoring
+
+**Visualization Dependencies:**
+- `plotly>=5.0.0` - Interactive 3D visualization
+- `trimesh>=3.9.0` - Mesh processing and visualization
+- `kaleido>=0.2.1` - Static image export for Plotly
 
 ### 3. Point Cloud Library (PCL)
 
@@ -216,15 +237,34 @@ cp config/default_config.yaml ~/.config/livox_sim/
 ### Test Installation
 
 ```bash
-# Run basic connectivity test
-python test_installation.py
+# Test Python simulation framework
+python lidar_motion_compensation.py --duration 10 --quiet
 
 # Expected output:
-# ✅ Python environment: OK
-# ✅ NumPy/SciPy: OK
-# ✅ Matplotlib: OK
-# ✅ Network configuration: OK
-# ✅ Livox SDK: OK
+# Simulation completed in X.XX seconds
+# Generated 100 frames with XXXXX total points
+
+# Verify all dependencies
+python -c "
+import numpy, scipy, matplotlib, pandas, open3d, laspy, utm, yaml, tqdm, psutil
+print('✅ All Python dependencies: OK')
+
+# Test visualization dependencies
+try:
+    import plotly
+    print('✅ Plotly: Available for interactive visualization')
+except ImportError:
+    print('⚠️  Plotly: Not available (optional)')
+
+try:
+    import trimesh
+    print('✅ Trimesh: Available for mesh processing')
+except ImportError:
+    print('⚠️  Trimesh: Not available (optional)')
+
+print('✅ Pure Python simulation: Ready')
+print('✅ 3D Visualization: Ready')
+"
 ```
 
 ## GNSS/INS Integration

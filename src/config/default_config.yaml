@@ -1,0 +1,86 @@
+# Livox Mid-70 Motion Compensation Simulation Configuration
+
+# Simulation Parameters
+simulation:
+  duration: 180.0                    # Simulation duration (seconds)
+  random_seed: 42                    # Random seed for reproducibility
+  output_directory: "./lidar_simulation_output"
+
+# Livox Mid-70 LiDAR Specifications
+lidar:
+  model: "Mid-70"
+  fov_horizontal: 70.4               # Horizontal FOV (degrees)
+  fov_vertical: 77.2                 # Vertical FOV (degrees)
+  range_max: 90.0                    # Maximum range (meters)
+  range_min: 0.05                    # Minimum range (5cm)
+  points_per_second: 100000          # Maximum point rate
+  frame_rate: 10                     # Fixed 10Hz
+  angular_resolution: 0.28           # Angular resolution (degrees)
+  point_accuracy: 0.02               # Point accuracy (±2cm)
+  wavelength: 905                    # Wavelength (nm)
+
+# Built-in IMU Configuration
+imu:
+  update_rate: 200                   # 200Hz update rate
+  gyro_range: 2000                   # ±2000°/s
+  accel_range: 16                    # ±16g
+  gyro_noise: 0.01                   # Gyroscope noise (rad/s)
+  accel_noise: 0.1                   # Accelerometer noise (m/s²)
+  bias_stability: 0.1                # Bias drift
+
+# Motion Parameters
+motion:
+  trajectory_type: "urban_circuit"   # Trajectory pattern
+  max_speed: 15.0                    # Maximum speed (m/s)
+  max_acceleration: 2.0              # Maximum acceleration (m/s²)
+  max_angular_velocity: 0.3          # Maximum angular velocity (rad/s)
+
+# Environment Settings
+environment:
+  complexity: "urban"                # Environment complexity level
+  building_density: 0.4              # Building density (0-1)
+  vegetation_coverage: 0.15          # Vegetation coverage (0-1)
+  dynamic_objects: true              # Enable dynamic objects
+
+# Advanced Features
+features:
+  enable_motion_compensation: true   # Enable IMU motion compensation
+  coordinate_system: "utm"           # Output coordinate system
+  lvx_format: "lvx2"                # LVX format version
+  real_time_processing: false        # Real-time processing simulation
+  quality_monitoring: true           # Enable quality monitoring
+
+# Sensor Fusion Configuration
+sensor_fusion:
+  algorithm: "extended_kalman_filter"
+  prediction_horizon: 0.1            # Prediction horizon (seconds)
+  outlier_rejection:
+    enabled: true
+    threshold: 3.0                   # Sigma threshold
+    method: "mahalanobis"
+
+# Export Configuration
+export:
+  formats: ["pcd", "las", "ply", "lvx2", "xyz"]
+  compression: true
+  metadata_inclusion: true
+
+# Performance Configuration
+performance:
+  memory_limit_gb: 8                 # Memory usage limit
+  cpu_cores: -1                      # CPU cores (-1 = all available)
+  gpu_acceleration: false            # GPU acceleration (if available)
+
+# Calibration Parameters
+calibration:
+  lidar_to_vehicle:
+    translation: [0.0, 0.0, 1.5]     # [x, y, z] in meters
+    rotation: [0.0, 0.0, 0.0]        # [roll, pitch, yaw] in radians
+  
+  vehicle_to_gnss:
+    translation: [0.3, 0.0, 0.3]     # GNSS antenna offset
+    rotation: [0.0, 0.0, 0.0]        # Alignment
+  
+  time_synchronization:
+    lidar_to_gnss_offset: 0.001      # Time offset (seconds)
+    uncertainty: 0.0005              # Timing uncertainty

@@ -7,10 +7,13 @@
 Run a basic simulation with default parameters:
 
 ```bash
-# Activate virtual environment
+# Activate virtual environment (if using one)
 source livox_env/bin/activate
 
-# Run simulation with defaults
+# Test installation first
+python test_simulation.py
+
+# Run full simulation with defaults (180 seconds, urban circuit)
 python lidar_motion_compensation.py
 
 # Check output directory
@@ -131,6 +134,10 @@ python lidar_motion_compensation.py --help
 ### Programmatic Usage
 
 ```python
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+
 from livox_simulator import LiDARMotionSimulator
 
 # Create simulator with configuration
@@ -148,8 +155,9 @@ results = simulator.run_simulation()
 
 # Access results
 print(f"Generated {len(results['frames'])} frames")
-print(f"Total points: {results['total_points']}")
+print(f"Total points: {len(results['point_cloud']):,}")
 print(f"Processing time: {results['processing_time']:.2f}s")
+print(f"Output saved to: {results['config']['output_directory']}")
 ```
 
 ## Output Files
@@ -443,6 +451,28 @@ config['coordinate_system'] = 'sensor'  # Start with sensor frame
 config['debug_transforms'] = True       # Enable debug output
 ```
 
+**5. Visualization Issues**
+```bash
+# Test visualization backends
+python -c "
+try:
+    import open3d; print('✅ Open3D available')
+except ImportError:
+    print('❌ Open3D not available')
+
+try:
+    import plotly; print('✅ Plotly available')
+except ImportError:
+    print('❌ Plotly not available')
+"
+
+# Use fallback backend
+python visualize_3d.py data.pcd --backend matplotlib
+
+# Reduce points for performance
+python visualize_3d.py large_file.pcd --max-points 10000
+```
+
 ### Debug Mode
 
 ```python
@@ -490,6 +520,77 @@ for chunk in np.array_split(large_point_cloud, 10):
     process_chunk(chunk)
 ```
 
+## 3D Data Visualization
+
+The framework includes comprehensive 3D visualization capabilities for analyzing simulation results and other 3D datasets.
+
+### Basic Visualization
+
+```bash
+# Visualize simulation output
+python visualize_3d.py lidar_simulation_output/processed_data/motion_compensated.pcd
+
+# Use different backends
+python visualize_3d.py data.pcd --backend open3d    # High-performance 3D viewer
+python visualize_3d.py data.pcd --backend plotly    # Interactive web-based
+python visualize_3d.py data.pcd --backend matplotlib # Traditional plotting
+```
+
+### Advanced Visualization Options
+
+```bash
+# Show detailed statistics
+python visualize_3d.py data.las --stats
+
+# Customize appearance
+python visualize_3d.py data.pcd --point-size 2 --opacity 0.8 --colorscale Plasma
+
+# Performance optimization
+python visualize_3d.py large_dataset.pcd --max-points 50000
+
+# Compare multiple datasets
+python visualize_3d.py file1.pcd file2.las file3.ply --compare
+```
+
+### Programmatic Visualization
+
+```python
+from livox_simulator import DataVisualizer3D
+
+# Create visualizer with specific backend
+visualizer = DataVisualizer3D(backend='plotly')
+
+# Load and visualize data
+data = visualizer.load_data('simulation_output.pcd')
+visualizer.visualize(data, 
+                    point_size=2, 
+                    opacity=0.8, 
+                    title='Simulation Results')
+
+# Generate comprehensive statistics
+stats = visualizer.generate_statistics(data)
+print(f"Dataset contains {stats['num_points']:,} points")
+print(f"Bounding box: {stats['dimensions']}")
+
+# Create comparison visualization
+datasets = ['before.pcd', 'after.pcd']
+titles = ['Before Processing', 'After Processing']
+visualizer.create_comparison_view(datasets, titles)
+```
+
+### Supported File Formats
+
+| Format | Extension | Type | Description |
+|--------|-----------|------|-------------|
+| **PCD** | .pcd | Point Cloud | PCL Point Cloud Data |
+| **PLY** | .ply | Point Cloud/Mesh | Polygon File Format |
+| **LAS/LAZ** | .las/.laz | Point Cloud | LiDAR data exchange format |
+| **XYZ** | .xyz | Point Cloud | ASCII coordinate data |
+| **CSV** | .csv | Point Cloud | Comma-separated values |
+| **OBJ** | .obj | Mesh | Wavefront OBJ format |
+| **STL** | .stl | Mesh | Stereolithography format |
+| **NPY/NPZ** | .npy/.npz | Array | NumPy array format |
+
 ## Next Steps
 
 After mastering basic usage:
@@ -498,5 +599,6 @@ After mastering basic usage:
 2. **Real Hardware Integration**: Connect to actual Livox Mid-70 hardware
 3. **Algorithm Development**: Use simulation for algorithm testing
 4. **Performance Tuning**: Optimize for your specific use case
+5. **Advanced Visualization**: Explore 3D data analysis and comparison tools
 
 Refer to the [API Reference](API_Reference.md) for detailed programming interface documentation.
