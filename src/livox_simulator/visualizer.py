@@ -414,7 +414,16 @@ class DataVisualizer3D:
             mesh.triangles = o3d.utility.Vector3iVector(data['faces'])
             mesh.compute_vertex_normals()
             
-            o3d.visualization.draw_geometries([mesh], **kwargs)
+            # Filter kwargs for Open3D compatibility
+            o3d_kwargs = {}
+            if 'window_name' in kwargs:
+                o3d_kwargs['window_name'] = kwargs['window_name']
+            if 'width' in kwargs:
+                o3d_kwargs['width'] = kwargs['width']
+            if 'height' in kwargs:
+                o3d_kwargs['height'] = kwargs['height']
+            
+            o3d.visualization.draw_geometries([mesh], **o3d_kwargs)
     
     def _visualize_plotly(self, data: Dict[str, Any], **kwargs) -> None:
         """Visualize using Plotly."""
