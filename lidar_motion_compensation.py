@@ -22,17 +22,17 @@ def load_config(config_path: str = None) -> dict:
     
     default_config = {
         # Simulation parameters
-        'duration': 60.0,
+        'duration': 10.0,  # Reduced for faster execution
         'random_seed': 42,
         'output_directory': './lidar_simulation_output',
         
-        # Livox Mid-70 specifications
+        # Livox Mid-70 specifications (optimized for speed)
         'fov_horizontal': 70.4,
         'fov_vertical': 77.2,
         'range_max': 90.0,
         'range_min': 0.05,
-        'points_per_second': 100000,
-        'frame_rate': 10,
+        'points_per_second': 10000,  # Reduced from 100k to 10k for speed
+        'frame_rate': 5,  # Reduced from 10 to 5 Hz for speed
         'angular_resolution': 0.28,
         'point_accuracy': 0.02,
         
@@ -53,10 +53,18 @@ def load_config(config_path: str = None) -> dict:
         'coordinate_system': 'utm',
         'lvx_format': 'lvx2',
         
-        # IMU configuration
-        'imu_update_rate': 200,
+        # IMU configuration (optimized for speed)
+        'imu_update_rate': 50,  # Reduced from 200 to 50 Hz for speed
         'imu_gyro_noise': 0.01,
-        'imu_accel_noise': 0.1
+        'imu_accel_noise': 0.1,
+        
+        # GNSS configuration (optimized for speed)
+        'enable_gnss_simulation': True,
+        'gnss_update_rate': 5,  # Reduced from 10 to 5 Hz for speed
+        'gnss_base_accuracy': 3.0,
+        'rtk_availability': 0.95,
+        'enable_atmospheric_errors': False,  # Disabled for speed
+        'enable_multipath_errors': False     # Disabled for speed
     }
     
     if config_path and os.path.exists(config_path):

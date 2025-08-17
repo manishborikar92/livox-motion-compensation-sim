@@ -14,11 +14,18 @@ The Livox motion compensation simulation system consists of several key componen
 │ Trajectory      │─────────────┘               │ Coordinate      │
 │ Generator       │                             │ Transformation  │
 └─────────────────┘                             └─────────────────┘
-                                                          │
+        │                                                │
+        ▼                                                │
 ┌─────────────────┐    ┌──────────────────┐             │
-│ Data Export     │◀───│ Global Alignment │◀────────────┘
-│ (LVX/PCD/LAS)   │    │ & Georeferencing │
-└─────────────────┘    └──────────────────┘
+│ GNSS Simulator  │───▶│ GNSS/INS Fusion  │             │
+│ Multi-Constellation│  │ Kalman Filter    │             │
+└─────────────────┘    └──────────────────┘             │
+        │                        │                      │
+        ▼                        ▼                      ▼
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│ INS Simulator   │───▶│ Global Alignment │◀───│ Data Export     │
+│ High-Rate IMU   │    │ & Georeferencing │    │ (LVX/PCD/LAS)   │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
 ```
 
 ## Core Components
@@ -55,8 +62,10 @@ The Livox motion compensation simulation system consists of several key componen
 
 ### Motion Sensing
 - **Built-in IMU**: 6-axis, 200Hz update rate
-- **External GNSS/INS**: Optional high-precision positioning
-- **Sensor Fusion**: Multi-sensor data integration
+- **GNSS Simulation**: Multi-constellation positioning (GPS, GLONASS, Galileo, BeiDou, QZSS)
+- **INS Integration**: High-rate inertial navigation with error modeling
+- **Sensor Fusion**: Extended Kalman Filter for GNSS/INS integration
+- **RTK Simulation**: Real-Time Kinematic positioning with cm-level accuracy
 
 ### Coordinate Systems
 - **Sensor Frame**: Raw LiDAR coordinates
@@ -68,10 +77,12 @@ The Livox motion compensation simulation system consists of several key componen
 
 1. **Trajectory Generation**: Create realistic vehicle motion patterns
 2. **Environment Simulation**: Generate 3D environment with obstacles
-3. **LiDAR Scanning**: Simulate point cloud acquisition with timing
-4. **Motion Compensation**: Apply IMU-based corrections
-5. **Coordinate Transformation**: Convert to global coordinates
-6. **Data Export**: Output in multiple formats (LVX, PCD, LAS)
+3. **GNSS/INS Simulation**: Generate navigation data with realistic errors
+4. **Sensor Fusion**: Combine GNSS and INS data using Kalman filtering
+5. **LiDAR Scanning**: Simulate point cloud acquisition with timing
+6. **Motion Compensation**: Apply GNSS/INS-based corrections
+7. **Coordinate Transformation**: Convert to global coordinates (UTM/WGS84)
+8. **Data Export**: Output in multiple formats (LVX, PCD, LAS, CSV)
 7. **Quality Assessment**: Validate accuracy and completeness
 
 ## Performance Characteristics

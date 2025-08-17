@@ -29,7 +29,7 @@ class MotionCompensator:
     
     def compensate_frame(self, points: np.ndarray, imu_data: List[IMUData], frame_time: float) -> np.ndarray:
         """
-        Apply motion compensation to a single LiDAR frame.
+        Apply motion compensation to a single LiDAR frame (optimized version).
         
         Args:
             points: Raw point cloud data (N×4: x,y,z,intensity)
@@ -39,41 +39,53 @@ class MotionCompensator:
         Returns:
             Motion-compensated points
         """
-        if not imu_data or len(imu_data) < 2:
-            return points  # Cannot compensate without sufficient IMU data
+        if not imu_data or len(imu_data) < 1:
+            return points  # Cannot compensate without IMU data
         
-        # Extract point timestamps (assuming they're in the 4th column or generate them)
-        if points.shape[1] > 4:
-            point_timestamps = points[:, 4]
+        # Use simplified compensation for speed - just use average IMU data
+        if len(imu_data) == 1:
+            avg_imu = imu_data[0]
         else:
-            # Generate timestamps assuming uniform distribution within frame
-            frame_duration = 1.0 / self.imu_config.get('frame_rate', 10)  # 10Hz default
-            point_timestamps = np.linspace(frame_time, frame_time + frame_duration, len(points))
+            # Calculate average IMU values for the frame
+            avg_gyro_x = np.mean([imu.gyro_x for imu in imu_data])
+            avg_gyro_y = np.mean([imu.gyro_y for imu in imu_data])
+            avg_gyro_z = np.mean([imu.gyro_z for imu in imu_data])
+            avg_accel_x = np.mean([imu.accel_x for imu in imu_data])
+            avg_accel_y = np.mean([imu.accel_y for imu in imu_data])
+            avg_accel_z = np.mean([imu.accel_z for imu in imu_data])
+            
+            avg_imu = IMUData(
+                timestamp=frame_time,
+                gyro_x=avg_gyro_x,
+                gyro_y=avg_gyro_y,
+                gyro_z=avg_gyro_z,
+                accel_x=avg_accel_x,
+                accel_y=avg_accel_y,
+                accel_z=avg_accel_z
+            )
         
-        # Interpolate IMU data for each point timestamp
-        compensated_points = []
+        # Apply uniform compensation to all points (much faster)
+        frame_duration = 1.0 / self.imu_config.get('frame_rate', 10)
+        avg_dt = frame_duration / 2.0  # Average time offset
         
-        for i, point in enumerate(points):
-            point_time = point_timestamps[i] if i < len(point_timestamps) else frame_time
-            
-            # Get interpolated IMU data at point timestamp
-            imu_sample = self._interpolate_imu_data(imu_data, point_time)
-            
-            # Apply motion compensation
-            compensated_point = self._apply_compensation(point[:3], imu_sample, frame_time, point_time)
-            
-            # Preserve intensity and other attributes
-            if points.shape[1] > 3:
-                compensated_point = np.append(compensated_point, point[3:])
-            
-            compensated_points.append(compensated_point)
+        # Calculate rotation for average time
+        angular_velocity = np.array([avg_imu.gyro_x, avg_imu.gyro_y, avg_imu.gyro_z])
+        rotation_angle = angular_velocity * avg_dt
         
-        compensated_array = np.array(compensated_points)
+        # Use small angle approximation for speed
+        if np.linalg.norm(rotation_angle) < 0.1:
+            rotation_matrix = self._small_angle_rotation_matrix(rotation_angle)
+        else:
+            rotation_matrix = Rotation.from_rotvec(rotation_angle).as_matrix()
+        
+        # Apply compensation to all points at once (vectorized)
+        compensated_points = points.copy()
+        compensated_points[:, :3] = (rotation_matrix.T @ points[:, :3].T).T
         
         # Update statistics
         self.statistics['frames_processed'] += 1
         
-        return compensated_array
+        return compensated_points
     
     def _interpolate_imu_data(self, imu_data: List[IMUData], target_time: float) -> IMUData:
         """

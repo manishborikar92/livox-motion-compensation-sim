@@ -40,6 +40,27 @@ class TrajectoryPoint:
 
 
 @dataclass
+class GNSSData:
+    """GNSS measurement data structure."""
+    timestamp: float           # GPS time (seconds)
+    latitude: float           # WGS84 latitude (degrees)
+    longitude: float          # WGS84 longitude (degrees)
+    altitude: float           # Height above ellipsoid (meters)
+    horizontal_accuracy: float # Horizontal position accuracy (meters)
+    vertical_accuracy: float   # Vertical position accuracy (meters)
+    velocity_north: float      # North velocity (m/s)
+    velocity_east: float       # East velocity (m/s)
+    velocity_up: float         # Up velocity (m/s)
+    velocity_accuracy: float   # Velocity accuracy (m/s)
+    fix_type: str             # Fix type ('NO_FIX', 'AUTONOMOUS', 'DGPS', 'RTK_FLOAT', 'RTK_FIXED', 'PPP')
+    satellites_used: int       # Number of satellites used
+    satellites_visible: int    # Number of satellites visible
+    hdop: float               # Horizontal dilution of precision
+    vdop: float               # Vertical dilution of precision
+    pdop: float               # Position dilution of precision
+
+
+@dataclass
 class SimulationConfig:
     """Complete simulation configuration."""
     # Simulation parameters
@@ -78,3 +99,11 @@ class SimulationConfig:
     imu_update_rate: int = 200
     imu_gyro_noise: float = 0.01
     imu_accel_noise: float = 0.1
+    
+    # GNSS configuration
+    enable_gnss_simulation: bool = True
+    gnss_update_rate: int = 10
+    gnss_base_accuracy: float = 3.0
+    rtk_availability: float = 0.95
+    enable_atmospheric_errors: bool = True
+    enable_multipath_errors: bool = True

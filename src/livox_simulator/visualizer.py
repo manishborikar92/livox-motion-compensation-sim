@@ -395,8 +395,17 @@ class DataVisualizer3D:
             if 'normals' in data and data['normals'] is not None:
                 pcd.normals = o3d.utility.Vector3dVector(data['normals'])
             
+            # Filter kwargs for Open3D compatibility
+            o3d_kwargs = {}
+            if 'window_name' in kwargs:
+                o3d_kwargs['window_name'] = kwargs['window_name']
+            if 'width' in kwargs:
+                o3d_kwargs['width'] = kwargs['width']
+            if 'height' in kwargs:
+                o3d_kwargs['height'] = kwargs['height']
+            
             # Visualize
-            o3d.visualization.draw_geometries([pcd], **kwargs)
+            o3d.visualization.draw_geometries([pcd], **o3d_kwargs)
         
         elif 'vertices' in data and 'faces' in data:
             # Mesh visualization

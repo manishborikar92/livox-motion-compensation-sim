@@ -28,9 +28,9 @@ class DataExporter:
             output_directory: Base directory for output files
         """
         self.output_directory = output_directory
-        self.supported_formats = ['pcd', 'ply', 'xyz', 'lvx2']
+        self.supported_formats = ['pcd', 'ply', 'xyz', 'lvx2', 'lvx3']
         if LASPY_AVAILABLE:
-            self.supported_formats.append('las')
+            self.supported_formats.extend(['las', 'laz'])
         
         # Create output directory structure
         self._create_directory_structure()
@@ -73,6 +73,10 @@ class DataExporter:
             self._export_xyz(points, filepath)
         elif format == 'lvx2':
             self._export_lvx2(points, filepath, metadata)
+        elif format == 'lvx3':
+            self._export_lvx3(points, filepath, metadata)
+        elif format == 'laz' and LASPY_AVAILABLE:
+            self._export_laz(points, filepath, metadata)
         else:
             raise NotImplementedError(f"Export for format {format} not implemented")
     
@@ -91,6 +95,34 @@ class DataExporter:
         
         # Write PCD file
         o3d.io.write_point_cloud(filepath, pcd, write_ascii=False)
+    
+    def _export_laz(self, points: np.ndarray, filepath: str, metadata: Optional[Dict] = None):
+        """Export to compressed LAZ format."""
+        if not LASPY_AVAILABLE:
+            raise ImportError("laspy package required for LAZ export")
+        
+        # Create LAS header with compression
+        header = laspy.LasHeader(point_format=3, version="1.4")
+        
+        # Set coordinate system if provided in metadata
+        if metadata and 'utm_zone' in metadata:
+            utm_zone = metadata['utm_zone']
+            hemisphere = metadata.get('hemisphere', 'N')
+            epsg_code = 32600 + utm_zone if hemisphere == 'N' else 32700 + utm_zone
+            header.add_crs(f"EPSG:{epsg_code}")
+        
+        # Create compressed LAZ file
+        with laspy.open(filepath, mode="w", header=header) as las_file:
+            las_file.x = points[:, 0]
+            las_file.y = points[:, 1]
+            las_file.z = points[:, 2]
+            
+            if points.shape[1] >= 4:
+                las_file.intensity = points[:, 3].astype(np.uint16)
+            
+            # Add metadata to header
+            las_file.header.system_identifier = "Livox Mid-70 Simulator"
+            las_file.header.generating_software = "Python Livox Simulator v1.0"
     
     def _export_las(self, points: np.ndarray, filepath: str, metadata: Optional[Dict] = None):
         """Export to LAS format."""
@@ -145,28 +177,45 @@ class DataExporter:
                       header='X Y Z', comments='# ')
     
     def _export_lvx2(self, points: np.ndarray, filepath: str, metadata: Optional[Dict] = None):
-        """Export to LVX2 format (simplified implementation)."""
-        # This is a simplified LVX2 writer - full implementation would require
-        # detailed knowledge of the Livox binary format specification
+        """Export to LVX2 format (enhanced implementation)."""
+        import time
         
         with open(filepath, 'wb') as f:
-            # Write LVX2 header
-            f.write(b'livox_tech')  # Signature
-            f.write(struct.pack('<I', 2))  # Version (LVX2)
-            f.write(struct.pack('<I', 0xAC0EA767))  # Magic code
+            # Write LVX2 header (40 bytes)
+            f.write(b'livox_tech')  # Signature (10 bytes)
+            f.write(struct.pack('<I', 2))  # Version (LVX2) (4 bytes)
+            f.write(struct.pack('<I', 0xAC0EA767))  # Magic code (4 bytes)
             
-            # Write device information
+            # Device count
             device_count = 1
-            f.write(struct.pack('<I', device_count))
+            f.write(struct.pack('<I', device_count))  # (4 bytes)
             
-            # Device info for Mid-70
+            # Reserved bytes to align to 40 bytes
+            f.write(b'\x00' * 18)
+            
+            # Write device information block (59 bytes per device)
             device_type = 1  # Mid-70 type
             f.write(struct.pack('<B', device_type))
             
-            # Write point data
-            point_count = len(points)
-            f.write(struct.pack('<I', point_count))
+            # Device serial number (16 bytes)
+            serial = metadata.get('device_serial', '3GGDJ6K00200101').encode('ascii')[:16]
+            f.write(serial.ljust(16, b'\x00'))
             
+            # LiDAR type and reserved
+            f.write(struct.pack('<B', 1))  # LiDAR type (Mid-70)
+            f.write(b'\x00' * 41)  # Reserved bytes
+            
+            # Frame header
+            timestamp_ns = int(time.time() * 1e9) if metadata is None else int(metadata.get('timestamp', time.time()) * 1e9)
+            point_count = len(points)
+            device_id = 0
+            
+            f.write(struct.pack('<Q', timestamp_ns))  # Timestamp (8 bytes)
+            f.write(struct.pack('<I', point_count))   # Point count (4 bytes)
+            f.write(struct.pack('<B', device_id))     # Device ID (1 byte)
+            f.write(b'\x00' * 3)  # Reserved (3 bytes)
+            
+            # Write point data (14 bytes per point)
             for point in points:
                 # Convert to millimeters and write as integers
                 x_mm = int(point[0] * 1000)
@@ -174,8 +223,89 @@ class DataExporter:
                 z_mm = int(point[2] * 1000)
                 intensity = int(point[3]) if points.shape[1] >= 4 else 128
                 
-                f.write(struct.pack('<iii', x_mm, y_mm, z_mm))
-                f.write(struct.pack('<B', intensity))
+                # Clamp values to valid ranges
+                x_mm = max(-2147483648, min(2147483647, x_mm))
+                y_mm = max(-2147483648, min(2147483647, y_mm))
+                z_mm = max(-2147483648, min(2147483647, z_mm))
+                intensity = max(0, min(255, intensity))
+                
+                f.write(struct.pack('<iii', x_mm, y_mm, z_mm))  # Position (12 bytes)
+                f.write(struct.pack('<B', intensity))           # Intensity (1 byte)
+                f.write(struct.pack('<B', 0))                   # Tag (1 byte)
+    
+    def _export_lvx3(self, points: np.ndarray, filepath: str, metadata: Optional[Dict] = None):
+        """Export to LVX3 format (latest Livox format)."""
+        import time
+        import zlib
+        
+        with open(filepath, 'wb') as f:
+            # Write LVX3 header
+            f.write(b'livox_tech')  # Signature (10 bytes)
+            f.write(struct.pack('<I', 3))  # Version (LVX3) (4 bytes)
+            f.write(struct.pack('<I', 0xAC0EA768))  # Magic code (4 bytes)
+            
+            # Enhanced header for LVX3
+            device_count = 1
+            f.write(struct.pack('<I', device_count))
+            
+            # Compression flag
+            compression_enabled = metadata.get('compression', True) if metadata else True
+            f.write(struct.pack('<B', 1 if compression_enabled else 0))
+            
+            # Reserved bytes
+            f.write(b'\x00' * 21)
+            
+            # Device information (enhanced for LVX3)
+            device_type = 1  # Mid-70
+            f.write(struct.pack('<B', device_type))
+            
+            # Extended device info
+            serial = metadata.get('device_serial', '3GGDJ6K00200101').encode('ascii')[:16]
+            f.write(serial.ljust(16, b'\x00'))
+            
+            # Firmware version
+            firmware = metadata.get('firmware_version', '03.08.0000').encode('ascii')[:16]
+            f.write(firmware.ljust(16, b'\x00'))
+            
+            # Hardware version
+            hardware = metadata.get('hardware_version', '01.00.0000').encode('ascii')[:16]
+            f.write(hardware.ljust(16, b'\x00'))
+            
+            # Reserved
+            f.write(b'\x00' * 16)
+            
+            # Prepare point data
+            point_data = bytearray()
+            timestamp_ns = int(time.time() * 1e9) if metadata is None else int(metadata.get('timestamp', time.time()) * 1e9)
+            
+            # Frame header
+            point_data.extend(struct.pack('<Q', timestamp_ns))
+            point_data.extend(struct.pack('<I', len(points)))
+            point_data.extend(struct.pack('<B', 0))  # Device ID
+            point_data.extend(b'\x00' * 3)  # Reserved
+            
+            # Point data with enhanced precision
+            for point in points:
+                # Use higher precision for LVX3 (micrometers)
+                x_um = int(point[0] * 1000000)
+                y_um = int(point[1] * 1000000)
+                z_um = int(point[2] * 1000000)
+                intensity = int(point[3]) if points.shape[1] >= 4 else 128
+                
+                point_data.extend(struct.pack('<qqq', x_um, y_um, z_um))  # 64-bit precision
+                point_data.extend(struct.pack('<H', intensity))           # 16-bit intensity
+                point_data.extend(struct.pack('<H', 0))                   # Reserved
+            
+            # Compress data if enabled
+            if compression_enabled:
+                compressed_data = zlib.compress(point_data, level=6)
+                f.write(struct.pack('<I', len(compressed_data)))  # Compressed size
+                f.write(struct.pack('<I', len(point_data)))       # Uncompressed size
+                f.write(compressed_data)
+            else:
+                f.write(struct.pack('<I', len(point_data)))       # Data size
+                f.write(struct.pack('<I', 0))                     # No compression
+                f.write(point_data)
     
     def export_trajectory(self, trajectory: List[Dict], format: str, filename: str):
         """

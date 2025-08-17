@@ -8,10 +8,11 @@ import psutil
 from typing import Dict, List, Any, Optional, Callable
 from tqdm import tqdm
 
-from .data_structures import LiDARFrame, IMUData, TrajectoryPoint, SimulationConfig
+from .data_structures import LiDARFrame, IMUData, TrajectoryPoint, SimulationConfig, GNSSData
 from .coordinates import CoordinateTransformer
 from .motion import MotionCompensator
 from .export import DataExporter
+from .gnss_simulation import GNSSSimulator, INSSimulator, GNSSINSFusion
 
 
 class LiDARMotionSimulator:
@@ -34,6 +35,9 @@ class LiDARMotionSimulator:
         self.coordinate_transformer = None
         self.motion_compensator = None
         self.data_exporter = DataExporter(self.config.output_directory)
+        self.gnss_simulator = None
+        self.ins_simulator = None
+        self.gnss_ins_fusion = None
         
         # Performance monitoring
         self.performance_callback = None
@@ -79,6 +83,31 @@ class LiDARMotionSimulator:
             'frame_rate': self.config.frame_rate
         }
         self.motion_compensator = MotionCompensator(imu_config)
+        
+        # Initialize GNSS/INS systems if enabled
+        if self.config.enable_gnss_simulation:
+            gnss_config = {
+                'update_rate': self.config.gnss_update_rate,
+                'base_accuracy': self.config.gnss_base_accuracy,
+                'rtk_availability': self.config.rtk_availability,
+                'multipath_enabled': self.config.enable_multipath_errors,
+                'atmospheric_errors': self.config.enable_atmospheric_errors
+            }
+            self.gnss_simulator = GNSSSimulator(gnss_config)
+            
+            ins_config = {
+                'update_rate': self.config.imu_update_rate,
+                'gyro_bias_stability': 1.0,
+                'accel_bias_stability': 0.1,
+                'gyro_noise': self.config.imu_gyro_noise,
+                'accel_noise': self.config.imu_accel_noise
+            }
+            self.ins_simulator = INSSimulator(ins_config)
+            
+            fusion_config = {
+                'algorithm': 'extended_kalman_filter'
+            }
+            self.gnss_ins_fusion = GNSSINSFusion(fusion_config)
     
     def run_simulation(self) -> Dict[str, Any]:
         """
@@ -98,6 +127,14 @@ class LiDARMotionSimulator:
             # Generate environment
             print("Creating simulation environment...")
             environment = self._generate_environment()
+            
+            # Generate GNSS/INS data if enabled
+            gnss_data = []
+            ins_data = []
+            fused_navigation = []
+            if self.config.enable_gnss_simulation:
+                print("Simulating GNSS/INS navigation...")
+                gnss_data, ins_data, fused_navigation = self._simulate_gnss_ins(trajectory)
             
             # Generate LiDAR frames with IMU data
             print("Simulating LiDAR scanning...")
@@ -127,6 +164,14 @@ class LiDARMotionSimulator:
                 'config': self.config.__dict__,
                 'metadata': self._generate_metadata()
             }
+            
+            # Add GNSS/INS data if available
+            if self.config.enable_gnss_simulation:
+                results.update({
+                    'gnss_data': gnss_data,
+                    'ins_data': ins_data,
+                    'fused_navigation': fused_navigation
+                })
             
             # Export data
             print("Exporting simulation data...")
@@ -266,6 +311,120 @@ class LiDARMotionSimulator:
         """Generate realistic urban driving trajectory."""
         # This is a simplified urban circuit - could be expanded with more complex patterns
         return self._generate_linear_trajectory(num_points)
+    
+    def _simulate_gnss_ins(self, trajectory: List[TrajectoryPoint]) -> tuple:
+        """Simulate GNSS/INS navigation data."""
+        gnss_data = []
+        ins_data = []
+        fused_navigation = []
+        
+        # GNSS simulation (typically 1-10 Hz)
+        gnss_interval = 1.0 / self.config.gnss_update_rate
+        gnss_times = np.arange(0, self.config.duration, gnss_interval)
+        
+        for gnss_time in tqdm(gnss_times, desc="Simulating GNSS"):
+            # Get true position from trajectory
+            traj_idx = min(int(gnss_time * 10), len(trajectory) - 1)
+            traj_point = trajectory[traj_idx]
+            
+            # Convert position to lat/lon (simplified - assumes local coordinates)
+            # In real implementation, this would use proper coordinate transformation
+            lat = 40.7128 + traj_point.position[1] / 111320.0  # Approximate conversion
+            lon = -74.0060 + traj_point.position[0] / (111320.0 * np.cos(np.radians(40.7128)))
+            alt = traj_point.position[2]
+            
+            true_position = (lat, lon, alt)
+            true_velocity = tuple(traj_point.velocity)
+            
+            # Simulate GNSS measurement
+            gnss_measurement = self.gnss_simulator.simulate_measurement(
+                true_position, gnss_time, true_velocity
+            )
+            
+            # Convert to our data structure
+            gnss_data_point = GNSSData(
+                timestamp=gnss_measurement.timestamp,
+                latitude=gnss_measurement.latitude,
+                longitude=gnss_measurement.longitude,
+                altitude=gnss_measurement.altitude,
+                horizontal_accuracy=gnss_measurement.horizontal_accuracy,
+                vertical_accuracy=gnss_measurement.vertical_accuracy,
+                velocity_north=gnss_measurement.velocity_north,
+                velocity_east=gnss_measurement.velocity_east,
+                velocity_up=gnss_measurement.velocity_up,
+                velocity_accuracy=gnss_measurement.velocity_accuracy,
+                fix_type=gnss_measurement.fix_type.value,
+                satellites_used=gnss_measurement.satellites_used,
+                satellites_visible=gnss_measurement.satellites_visible,
+                hdop=gnss_measurement.hdop,
+                vdop=gnss_measurement.vdop,
+                pdop=gnss_measurement.pdop
+            )
+            gnss_data.append(gnss_data_point)
+        
+        # INS simulation (high frequency, typically 100-1000 Hz)
+        ins_interval = 1.0 / self.config.imu_update_rate
+        ins_times = np.arange(0, self.config.duration, ins_interval)
+        
+        for ins_time in ins_times:
+            # Get true state from trajectory
+            traj_idx = min(int(ins_time * 10), len(trajectory) - 1)
+            traj_point = trajectory[traj_idx]
+            
+            # Convert to lat/lon
+            lat = 40.7128 + traj_point.position[1] / 111320.0
+            lon = -74.0060 + traj_point.position[0] / (111320.0 * np.cos(np.radians(40.7128)))
+            alt = traj_point.position[2]
+            
+            true_position = (lat, lon, alt)
+            true_velocity = tuple(traj_point.velocity)
+            true_attitude = tuple(traj_point.orientation)
+            
+            # Simulate INS data
+            ins_measurement = self.ins_simulator.simulate_ins_data(
+                true_position, true_velocity, true_attitude, ins_time
+            )
+            ins_data.append(ins_measurement)
+        
+        # GNSS/INS fusion
+        for i, gnss_point in enumerate(gnss_data):
+            # Find corresponding INS data
+            ins_idx = min(int(gnss_point.timestamp * self.config.imu_update_rate), len(ins_data) - 1)
+            if ins_idx < len(ins_data):
+                ins_point = ins_data[ins_idx]
+                
+                # Create a temporary GNSS measurement for fusion
+                from .gnss_simulation import GNSSMeasurement, FixType
+                temp_measurement = GNSSMeasurement(
+                    timestamp=gnss_point.timestamp,
+                    latitude=gnss_point.latitude,
+                    longitude=gnss_point.longitude,
+                    altitude=gnss_point.altitude,
+                    horizontal_accuracy=gnss_point.horizontal_accuracy,
+                    vertical_accuracy=gnss_point.vertical_accuracy,
+                    velocity_north=gnss_point.velocity_north,
+                    velocity_east=gnss_point.velocity_east,
+                    velocity_up=gnss_point.velocity_up,
+                    velocity_accuracy=gnss_point.velocity_accuracy,
+                    fix_type=FixType(gnss_point.fix_type),
+                    satellites_used=gnss_point.satellites_used,
+                    satellites_visible=gnss_point.satellites_visible,
+                    hdop=gnss_point.hdop,
+                    vdop=gnss_point.vdop,
+                    pdop=gnss_point.pdop,
+                    age_of_corrections=0.0,
+                    base_station_id=0,
+                    satellites=[]
+                )
+                
+                # Perform fusion
+                dt = 1.0 / self.config.gnss_update_rate
+                fused_solution = self.gnss_ins_fusion.update(
+                    temp_measurement, ins_point, dt
+                )
+                fused_navigation.append(fused_solution)
+        
+        return gnss_data, ins_data, fused_navigation
     
     def _generate_environment(self) -> Dict[str, Any]:
         """Generate simulation environment based on complexity setting."""

@@ -210,6 +210,77 @@ class DataVisualizer3D:
     def generate_statistics(self, data: Union[str, dict]) -> dict
 ```
 
+### GNSSSimulator
+
+Comprehensive GNSS simulation engine supporting multiple constellations and error models.
+
+```python
+class GNSSSimulator:
+    def __init__(self, config: dict)
+    def simulate_measurement(self, true_position: tuple, timestamp: float, velocity: tuple = None) -> GNSSMeasurement
+```
+
+#### Constructor
+
+```python
+def __init__(self, config: dict)
+```
+
+**Parameters:**
+- `config` (dict): GNSS simulation configuration
+
+**Example:**
+```python
+gnss_config = {
+    'update_rate': 10,
+    'base_accuracy': 3.0,
+    'rtk_availability': 0.95,
+    'constellations': {
+        'GPS': {'enabled': True, 'satellites': 32},
+        'GLONASS': {'enabled': True, 'satellites': 24}
+    }
+}
+gnss_sim = GNSSSimulator(gnss_config)
+```
+
+#### Methods
+
+##### simulate_measurement()
+
+```python
+def simulate_measurement(self, true_position: tuple, timestamp: float, velocity: tuple = None) -> GNSSMeasurement
+```
+
+Simulate GNSS measurement at given position and time.
+
+**Parameters:**
+- `true_position` (tuple): True position (lat, lon, alt) in degrees and meters
+- `timestamp` (float): GPS time in seconds
+- `velocity` (tuple, optional): True velocity (north, east, up) in m/s
+
+**Returns:**
+- `GNSSMeasurement`: Simulated GNSS measurement with errors and quality indicators
+
+### INSSimulator
+
+Inertial Navigation System simulator with realistic error modeling.
+
+```python
+class INSSimulator:
+    def __init__(self, config: dict)
+    def simulate_ins_data(self, true_position: tuple, true_velocity: tuple, true_attitude: tuple, timestamp: float) -> INSData
+```
+
+### GNSSINSFusion
+
+GNSS/INS sensor fusion using Extended Kalman Filter.
+
+```python
+class GNSSINSFusion:
+    def __init__(self, config: dict)
+    def update(self, gnss_data: GNSSMeasurement, ins_data: INSData, dt: float) -> dict
+```
+
 #### Constructor
 
 ```python
@@ -422,6 +493,87 @@ class TrajectoryPoint:
     acceleration: np.ndarray # Acceleration [ax, ay, az] (m/s²)
 ```
 
+### GNSSData
+
+Represents GNSS measurement data.
+
+```python
+@dataclass
+class GNSSData:
+    timestamp: float           # GPS time (seconds)
+    latitude: float           # WGS84 latitude (degrees)
+    longitude: float          # WGS84 longitude (degrees)
+    altitude: float           # Height above ellipsoid (meters)
+    horizontal_accuracy: float # Horizontal position accuracy (meters)
+    vertical_accuracy: float   # Vertical position accuracy (meters)
+    velocity_north: float      # North velocity (m/s)
+    velocity_east: float       # East velocity (m/s)
+    velocity_up: float         # Up velocity (m/s)
+    velocity_accuracy: float   # Velocity accuracy (m/s)
+    fix_type: str             # Fix type ('NO_FIX', 'AUTONOMOUS', 'DGPS', 'RTK_FLOAT', 'RTK_FIXED', 'PPP')
+    satellites_used: int       # Number of satellites used
+    satellites_visible: int    # Number of satellites visible
+    hdop: float               # Horizontal dilution of precision
+    vdop: float               # Vertical dilution of precision
+    pdop: float               # Position dilution of precision
+```
+
+### GNSSMeasurement
+
+Comprehensive GNSS measurement with satellite information.
+
+```python
+@dataclass
+class GNSSMeasurement:
+    timestamp: float           # GPS time (seconds)
+    latitude: float           # WGS84 latitude (degrees)
+    longitude: float          # WGS84 longitude (degrees)
+    altitude: float           # Height above ellipsoid (meters)
+    horizontal_accuracy: float # Horizontal position accuracy (meters)
+    vertical_accuracy: float   # Vertical position accuracy (meters)
+    velocity_north: float      # North velocity (m/s)
+    velocity_east: float       # East velocity (m/s)
+    velocity_up: float         # Up velocity (m/s)
+    velocity_accuracy: float   # Velocity accuracy (m/s)
+    fix_type: FixType         # Fix type enumeration
+    satellites_used: int       # Number of satellites used
+    satellites_visible: int    # Number of satellites visible
+    hdop: float               # Horizontal dilution of precision
+    vdop: float               # Vertical dilution of precision
+    pdop: float               # Position dilution of precision
+    age_of_corrections: float  # Age of differential corrections (seconds)
+    base_station_id: int      # RTK base station ID
+    satellites: List[GNSSSatellite] # Individual satellite information
+```
+
+### INSData
+
+Inertial Navigation System data structure.
+
+```python
+@dataclass
+class INSData:
+    timestamp: float
+    latitude: float           # Integrated position
+    longitude: float
+    altitude: float
+    velocity_north: float     # Integrated velocity
+    velocity_east: float
+    velocity_up: float
+    roll: float               # Attitude (radians)
+    pitch: float
+    yaw: float
+    angular_rate_x: float     # Body frame angular rates (rad/s)
+    angular_rate_y: float
+    angular_rate_z: float
+    acceleration_x: float     # Body frame accelerations (m/s²)
+    acceleration_y: float
+    acceleration_z: float
+    position_accuracy: float  # Position accuracy estimate (meters)
+    velocity_accuracy: float  # Velocity accuracy estimate (m/s)
+    attitude_accuracy: float  # Attitude accuracy estimate (radians)
+```
+
 ## Configuration Schema
 
 ### Main Configuration
@@ -465,6 +617,14 @@ config_schema = {
     'enable_motion_compensation': bool,   # Enable motion compensation
     'coordinate_system': str,            # Output coordinate system
     'lvx_format': str,                   # LVX format version
+    
+    # GNSS simulation
+    'enable_gnss_simulation': bool,      # Enable GNSS simulation
+    'gnss_update_rate': int,             # GNSS update rate (Hz)
+    'gnss_base_accuracy': float,         # Base GNSS accuracy (meters)
+    'rtk_availability': float,           # RTK availability (0-1)
+    'enable_atmospheric_errors': bool,   # Enable atmospheric error modeling
+    'enable_multipath_errors': bool,     # Enable multipath error modeling
 }
 ```
 
@@ -489,6 +649,43 @@ sensor_config = {
         'attitude_accuracy': float,       # degrees
         'update_rate': int,               # Hz
         'rtk_availability': float,        # 0-1 probability
+    },
+    
+    'gnss_constellations': {
+        'GPS': {
+            'enabled': bool,
+            'satellites': int,            # Number of satellites
+            'signal_strength': float      # Base signal strength (dB-Hz)
+        },
+        'GLONASS': {
+            'enabled': bool,
+            'satellites': int,
+            'signal_strength': float
+        },
+        'GALILEO': {
+            'enabled': bool,
+            'satellites': int,
+            'signal_strength': float
+        },
+        'BEIDOU': {
+            'enabled': bool,
+            'satellites': int,
+            'signal_strength': float
+        },
+        'QZSS': {
+            'enabled': bool,
+            'satellites': int,
+            'signal_strength': float
+        }
+    },
+    
+    'error_models': {
+        'ionospheric_model': str,         # 'klobuchar', 'dual_frequency'
+        'tropospheric_model': str,        # 'saastamoinen', 'hopfield'
+        'multipath_model': str,           # 'simple', 'advanced'
+        'clock_stability': float,         # Clock drift rate (s/s)
+        'code_noise': float,              # Code measurement noise (meters)
+        'carrier_noise': float            # Carrier phase noise (cycles)
     }
 }
 ```

@@ -84,6 +84,14 @@ config = {
     'enable_motion_compensation': True,   # IMU-based compensation
     'coordinate_system': 'utm',          # Output coordinate system
     'lvx_format': 'lvx2',               # LVX format version
+    
+    # === GNSS/INS SIMULATION ===
+    'enable_gnss_simulation': True,      # Enable GNSS simulation
+    'gnss_update_rate': 10,              # GNSS update rate (Hz)
+    'gnss_base_accuracy': 3.0,           # Base accuracy (meters)
+    'rtk_availability': 0.95,            # RTK availability (95%)
+    'enable_atmospheric_errors': True,   # Atmospheric error modeling
+    'enable_multipath_errors': True,     # Multipath error modeling
 }
 ```
 
@@ -158,6 +166,55 @@ print(f"Generated {len(results['frames'])} frames")
 print(f"Total points: {len(results['point_cloud']):,}")
 print(f"Processing time: {results['processing_time']:.2f}s")
 print(f"Output saved to: {results['config']['output_directory']}")
+
+# Access GNSS data if enabled
+if 'gnss_data' in results:
+    print(f"GNSS measurements: {len(results['gnss_data'])}")
+    print(f"Average accuracy: {np.mean([g.horizontal_accuracy for g in results['gnss_data']]):.2f}m")
+```
+
+### GNSS-Only Simulation
+
+```python
+from livox_simulator import GNSSSimulator, GNSSINSFusion
+
+# Configure GNSS simulation
+gnss_config = {
+    'update_rate': 10,
+    'base_accuracy': 3.0,
+    'rtk_availability': 0.9,
+    'constellations': {
+        'GPS': {'enabled': True, 'satellites': 32},
+        'GLONASS': {'enabled': True, 'satellites': 24},
+        'GALILEO': {'enabled': True, 'satellites': 30}
+    }
+}
+
+# Initialize GNSS simulator
+gnss_sim = GNSSSimulator(gnss_config)
+
+# Simulate trajectory
+import numpy as np
+duration = 300  # 5 minutes
+times = np.arange(0, duration, 1.0)  # 1 Hz simulation
+
+gnss_measurements = []
+for t in times:
+    # Define true position (moving vehicle)
+    lat = 40.7128 + 0.001 * np.sin(t / 60)  # Sinusoidal motion
+    lon = -74.0060 + 0.001 * np.cos(t / 60)
+    alt = 10.0 + 2.0 * np.sin(t / 30)
+    
+    true_position = (lat, lon, alt)
+    true_velocity = (5.0, 2.0, 0.1)  # m/s
+    
+    # Simulate GNSS measurement
+    measurement = gnss_sim.simulate_measurement(true_position, t, true_velocity)
+    gnss_measurements.append(measurement)
+    
+    print(f"Time: {t:3.0f}s, Fix: {measurement.fix_type.name}, "
+          f"Accuracy: {measurement.horizontal_accuracy:.2f}m, "
+          f"Satellites: {measurement.satellites_used}")
 ```
 
 ## Output Files
@@ -169,18 +226,24 @@ lidar_simulation_output/
 ├── raw_data/
 │   ├── lidar_frames.lvx2         # Raw LiDAR data
 │   ├── imu_data_200hz.csv        # High-frequency IMU data
+│   ├── gnss_measurements.csv     # GNSS measurement data
+│   ├── ins_navigation.csv        # INS navigation data
 │   ├── trajectory.csv            # Vehicle trajectory
 │   └── motion_data.csv           # Synchronized motion data
 ├── processed_data/
 │   ├── motion_compensated.pcd    # Compensated point cloud
 │   ├── global_coordinates.las    # Georeferenced LAS file
+│   ├── fused_navigation.csv      # GNSS/INS fused solution
 │   └── merged_dataset.ply        # Visualization format
 ├── analysis/
 │   ├── performance_stats.json    # Processing metrics
-│   ├── quality_report.html       # Quality assessment
+│   ├── gnss_quality_report.html  # GNSS quality assessment
+│   ├── navigation_accuracy.png   # Navigation accuracy plots
+│   ├── quality_report.html       # Overall quality assessment
 │   └── accuracy_analysis.png     # Accuracy plots
 └── configuration/
     ├── simulation_config.json    # Complete configuration
+    ├── gnss_config.json          # GNSS configuration
     └── system_info.txt           # System information
 ```
 
@@ -269,6 +332,85 @@ plt.plot(motion_data['timestamp'], motion_data['vel_x'], label='Vel X')
 plt.plot(motion_data['timestamp'], motion_data['vel_y'], label='Vel Y')
 plt.legend()
 plt.title('Vehicle Velocity')
+plt.tight_layout()
+plt.show()
+```
+
+**GNSS Data Analysis:**
+```python
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Load GNSS measurements
+gnss_data = pd.read_csv("gnss_measurements.csv")
+print(f"GNSS data shape: {gnss_data.shape}")
+print(gnss_data.head())
+
+# Plot position accuracy over time
+plt.figure(figsize=(12, 8))
+
+plt.subplot(3, 1, 1)
+plt.plot(gnss_data['timestamp'], gnss_data['horizontal_accuracy'])
+plt.ylabel('Horizontal Accuracy (m)')
+plt.title('GNSS Position Accuracy')
+plt.grid(True)
+
+plt.subplot(3, 1, 2)
+plt.plot(gnss_data['timestamp'], gnss_data['satellites_used'], 'o-', markersize=3)
+plt.ylabel('Satellites Used')
+plt.title('Satellite Count')
+plt.grid(True)
+
+plt.subplot(3, 1, 3)
+fix_types = gnss_data['fix_type'].map({
+    'NO_FIX': 0, 'AUTONOMOUS': 1, 'DGPS': 2, 
+    'RTK_FLOAT': 4, 'RTK_FIXED': 5, 'PPP': 6
+})
+plt.plot(gnss_data['timestamp'], fix_types, 'o-', markersize=3)
+plt.ylabel('Fix Type')
+plt.xlabel('Time (s)')
+plt.title('GNSS Fix Type')
+plt.yticks([0, 1, 2, 4, 5, 6], ['NO_FIX', 'AUTO', 'DGPS', 'RTK_FLOAT', 'RTK_FIXED', 'PPP'])
+plt.grid(True)
+
+plt.tight_layout()
+plt.show()
+
+# Calculate statistics
+print("\nGNSS Performance Statistics:")
+print(f"Average horizontal accuracy: {gnss_data['horizontal_accuracy'].mean():.2f} m")
+print(f"95th percentile accuracy: {gnss_data['horizontal_accuracy'].quantile(0.95):.2f} m")
+print(f"RTK fixed availability: {(gnss_data['fix_type'] == 'RTK_FIXED').mean():.1%}")
+print(f"Average satellites used: {gnss_data['satellites_used'].mean():.1f}")
+```
+
+**Navigation Fusion Analysis:**
+```python
+# Load fused navigation data
+fused_nav = pd.read_csv("fused_navigation.csv")
+
+# Compare GNSS-only vs fused solution
+plt.figure(figsize=(12, 6))
+
+plt.subplot(1, 2, 1)
+plt.plot(gnss_data['longitude'], gnss_data['latitude'], 'b-', alpha=0.7, label='GNSS Only')
+plt.plot(fused_nav['longitude'], fused_nav['latitude'], 'r-', alpha=0.7, label='GNSS/INS Fused')
+plt.xlabel('Longitude')
+plt.ylabel('Latitude')
+plt.title('Trajectory Comparison')
+plt.legend()
+plt.grid(True)
+
+plt.subplot(1, 2, 2)
+plt.plot(gnss_data['timestamp'], gnss_data['horizontal_accuracy'], 'b-', label='GNSS Only')
+plt.plot(fused_nav['timestamp'], fused_nav['position_accuracy'], 'r-', label='Fused Solution')
+plt.xlabel('Time (s)')
+plt.ylabel('Position Accuracy (m)')
+plt.title('Accuracy Comparison')
+plt.legend()
+plt.grid(True)
+
 plt.tight_layout()
 plt.show()
 ```
